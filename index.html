@@ -78,6 +78,13 @@
     .progress-bar { height: 100%; width: 0;  background-color: #4caf50; border-radius: 5px; position: absolute; top: 0; left: 0;  transition: width 0.2s ease-in-out; }
     .progress-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-weight: bold; color: black; z-index: 2; }
     doro-doro { position: absolute; margin: -15px 0 0 10px; }
+    .files-list { max-height: 400px; overflow-y: auto; border: 1px solid var(--theme); border-radius: 10px; padding: 10px; margin-top: 10px; }
+    .file-item { display: flex; justify-content: space-between; align-items: center; padding: 8px; margin: 2px 0; background-color: var(--ltheme); border-radius: 5px; cursor: pointer; }
+    .file-item:hover { background-color: var(--theme); }
+    .file-item.selected { background-color: var(--link); color: white; }
+    .file-name { font-weight: bold; flex-grow: 1; }
+    .file-size { font-size: 0.8em; color: var(--datatxt); margin-left: 10px; }
+    .file-path { font-size: 0.7em; color: var(--datatxt); font-style: italic; }
   </style>
 </head>
 <body class="dark-theme">
@@ -317,6 +324,18 @@
             <button class="settings-button" onclick="document.getElementById('customFields').dispatchEvent(new Event('input', { bubbles: true, cancelable: true }))">Save Custom Field Changes</button>
             <textarea id="customFields" class="settings-field" style="display: none;" rows="12" spellcheck="false" data-editable-list="editableList"></textarea>      
           </div>
+      </div>
+    </div>
+
+    <!-- Server Files Panel -->
+    <div id="serverFilesPanel">
+      <h3 class="collapsible expanded" data-target="server-files-content">Available Files</h3>
+      <div id="server-files-content" class="content">
+        <div class="panel-option">
+          <button id="refreshFilesBtn" class="settings-button">Refresh File List</button>
+          <span id="serverInfo" class="notes"></span>
+        </div>
+        <div id="filesList" class="files-list"></div>
       </div>
     </div>
 
@@ -630,6 +649,17 @@
     const loadingMessage = document.querySelector('.loading-message');
     const progressBar = document.querySelector('.progress-bar');
     const progressText = document.querySelector('.progress-text');
+    
+    // Server-related elements
+    const serverFilesPanel = document.getElementById('serverFilesPanel');
+    const filesList = document.getElementById('filesList');
+    const refreshFilesBtn = document.getElementById('refreshFilesBtn');
+    const serverInfo = document.getElementById('serverInfo');
+    
+    // Server state
+    let serverFiles = [];
+    let selectedFileItem = null;
+    let isServerMode = false;
     //#endregion Global Variables
     //#region Initialization 
     init();
@@ -640,6 +670,7 @@
       initSettingsStorage();
       initCollapsible();
       initTabs();
+      initServerMode();
       [tagFrequencyCount, tagFrequencyFilter, tagExcludeFilter, tagExcludeFilterMethod, tagFrequencyFilterMethod].forEach(e=>{ e.addEventListener('change', updateTagFrequency); });
       tagByFolder.addEventListener('click', updateTagFrequency);
       [suggestedPromptCount, suggestedPromptFilter, suggestedPromptExcludeFilter, suggestedPromptExcludeFilterMethod, suggestedPromptFilterMethod].forEach(e=>{ e.addEventListener('change', ()=>{updateTagFrequency(null,true);}); });
@@ -761,9 +792,138 @@
       });
     }
 
+    function initServerMode() {
+      // Check if we're running in server mode by trying to fetch server info
+      fetch('/api/info')
+        .then(response => response.json())
+        .then(data => {
+          if (data.server_mode) {
+            isServerMode = true;
+            serverInfo.textContent = `Server directory: ${data.files_directory}`;
+            loadServerFiles();
+            serverFilesPanel.style.display = 'block';
+          } else {
+            serverFilesPanel.style.display = 'none';
+          }
+        })
+        .catch(error => {
+          // Not in server mode or server not available
+          serverFilesPanel.style.display = 'none';
+          isServerMode = false;
+        });
+      
+      // Add event listeners for server UI
+      refreshFilesBtn.addEventListener('click', loadServerFiles);
+    }
+
+    async function loadServerFiles() {
+      try {
+        showLoading('Loading file list...');
+        const response = await fetch('/api/files');
+        const data = await response.json();
+        
+        if (response.ok) {
+          serverFiles = data.files;
+          renderFilesList();
+          serverInfo.textContent = `Found ${data.total} files in: ${data.directory}`;
+        } else {
+          serverInfo.textContent = `Error: ${data.error}`;
+          filesList.innerHTML = '<div class="error">Failed to load files</div>';
+        }
+      } catch (error) {
+        serverInfo.textContent = 'Error connecting to server';
+        filesList.innerHTML = '<div class="error">Failed to connect to server</div>';
+      } finally {
+        hideLoading();
+      }
+    }
+
+    function renderFilesList() {
+      if (serverFiles.length === 0) {
+        filesList.innerHTML = '<div class="notes">No compatible files found</div>';
+        return;
+      }
+
+      const filesHtml = serverFiles.map(file => {
+        const sizeText = formatFileSize(file.size);
+        const pathText = file.relative_path !== file.name ? file.relative_path : '';
+        
+        return `
+          <div class="file-item" data-file-path="${file.relative_path}">
+            <div>
+              <div class="file-name">${file.name}</div>
+              ${pathText ? `<div class="file-path">${pathText}</div>` : ''}
+            </div>
+            <div class="file-size">${sizeText}</div>
+          </div>
+        `;
+      }).join('');
+
+      filesList.innerHTML = filesHtml;
+
+      // Add click handlers to file items
+      filesList.querySelectorAll('.file-item').forEach(item => {
+        item.addEventListener('click', () => {
+          // Remove previous selection
+          if (selectedFileItem) {
+            selectedFileItem.classList.remove('selected');
+          }
+          
+          // Select current item
+          item.classList.add('selected');
+          selectedFileItem = item;
+          
+          // Load the file
+          const filePath = item.getAttribute('data-file-path');
+          loadServerFile(filePath);
+        });
+      });
+    }
+
+    async function loadServerFile(filePath) {
+      try {
+        showLoading('Loading file...');
+        const response = await fetch(`/api/file/${encodeURIComponent(filePath)}`);
+        
+        if (response.ok) {
+          const blob = await response.blob();
+          // Create a File object from the blob
+          const file = new File([blob], filePath.split('/').pop(), {
+            type: 'application/octet-stream'
+          });
+          
+          // Set the file name for display
+          safetensorsFile = file;
+          safetensorsFile.serverPath = filePath;
+          
+          // Process the file using existing handleFile logic
+          await handleFileData(file);
+        } else {
+          const errorData = await response.json();
+          notificationPanel.innerHTML = `Error loading file: ${errorData.error}`;
+        }
+      } catch (error) {
+        notificationPanel.innerHTML = `Error loading file: ${error.message}`;
+      } finally {
+        hideLoading();
+      }
+    }
+
+    function formatFileSize(bytes) {
+      if (bytes === 0) return '0 Bytes';
+      const k = 1024;
+      const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
     async function handleFile(file) {
       clearAll();
       safetensorsFile = file;
+      await handleFileData(file);
+    }
+
+    async function handleFileData(file) {
       if(file.name.endsWith('.gguf')) {
         updateCivitAiInfo(file);
         setCustomMetadata();
