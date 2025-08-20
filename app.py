@@ -100,28 +100,15 @@ def serve_file(filename):
         if not os.path.exists(file_path):
             return jsonify({'error': 'File not found'}), 404
         
-        # Get file size for headers
-        file_size = os.path.getsize(file_path)
-        
-        print(f"Serving file: {file_path} ({file_size:,} bytes)")
-        
-        # Serve the file with appropriate headers for large file streaming
-        response = send_file(
+        # Serve the file with appropriate headers
+        return send_file(
             file_path,
             as_attachment=False,
             download_name=os.path.basename(file_path),
             mimetype='application/octet-stream'
         )
-        
-        # Add headers to help with large file downloads
-        response.headers['Content-Length'] = str(file_size)
-        response.headers['Accept-Ranges'] = 'bytes'
-        response.headers['Cache-Control'] = 'no-cache'
-        
-        return response
     
     except Exception as e:
-        print(f"Error serving file {filename}: {str(e)}")
         return jsonify({'error': f'Error serving file: {str(e)}'}), 500
 
 @app.route('/api/info')
