@@ -882,11 +882,13 @@
 
     async function loadServerFile(filePath) {
       try {
-        showLoading('Loading file...');
+        showLoading('Downloading file...');
         const response = await fetch(`/api/file/${encodeURIComponent(filePath)}`);
         
         if (response.ok) {
+          updateLoading('File downloaded, processing...', 25);
           const blob = await response.blob();
+          
           // Create a File object from the blob
           const file = new File([blob], filePath.split('/').pop(), {
             type: 'application/octet-stream'
@@ -897,14 +899,15 @@
           safetensorsFile.serverPath = filePath;
           
           // Process the file using existing handleFile logic
+          // Don't hide loading here - let handleFileData manage the loading state
           await handleFileData(file);
         } else {
           const errorData = await response.json();
           notificationPanel.innerHTML = `Error loading file: ${errorData.error}`;
+          hideLoading();
         }
       } catch (error) {
         notificationPanel.innerHTML = `Error loading file: ${error.message}`;
-      } finally {
         hideLoading();
       }
     }
@@ -1633,11 +1636,17 @@
       let hashType;
       let autov2;
       let autov3;
-      showLoading('Processing...');
+      
+      // Only show loading if not already showing (for server file downloads)
+      if (loading.style.display !== 'block') {
+        showLoading('Processing...');
+      } else {
+        updateLoading('Processing...', 30);
+      }
       if(file){
         try{
           const TWO_GB = 2 * 1024 * 1024 * 1024;
-          updateLoading('Calculating AutoV2 hash...');
+          updateLoading('Calculating AutoV2 hash...', 35);
           if (file.size > TWO_GB) {
             
             autov2 = await calculateHashInChunks(file);
@@ -1646,7 +1655,7 @@
           else {
             autov2 = await calculateFileHash(file);
             autov2 = autov2.substring(0,10);
-            updateLoading('Calculating AutoV3 hash...', 50);
+            updateLoading('Calculating AutoV3 hash...', 60);
             autov3 = await calculateAutoV3Hash(file);
             autov3 = autov3.substring(0,12);
           }
@@ -1655,7 +1664,7 @@
             notificationPanel.innerHTML = (Object.keys(fileMetadata).length ? 'Metadata was found, but t':'T' ) + 'here was a problem calculating the hash. The file size may be too large.';
         }
       }
-      updateLoading('CivitAI lookup...', 75);
+      updateLoading('CivitAI lookup...', 85);
       const fetchWithHash = async (url) => {
         try {
           const response = await fetch(url);
