@@ -35,11 +35,16 @@ def get_file_info(file_path):
 def index():
     """Serve the main HTML page"""
     try:
-        with open('index.html', 'r', encoding='utf-8') as f:
+        # Get the directory where this script is located
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        html_path = os.path.join(script_dir, 'index.html')
+        
+        with open(html_path, 'r', encoding='utf-8') as f:
             html_content = f.read()
         return html_content
     except FileNotFoundError:
-        return "index.html not found. Make sure it's in the same directory as app.py", 404
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        return f"index.html not found. Looking for it at: {os.path.join(script_dir, 'index.html')}", 404
 
 @app.route('/api/files')
 def list_files():
