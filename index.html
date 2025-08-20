@@ -883,11 +883,43 @@
     async function loadServerFile(filePath) {
       try {
         showLoading('Downloading file...');
+        
         const response = await fetch(`/api/file/${encodeURIComponent(filePath)}`);
         
         if (response.ok) {
+          const contentLength = response.headers.get('Content-Length');
+          const total = parseInt(contentLength, 10);
+          let loaded = 0;
+          
+          const reader = response.body.getReader();
+          const stream = new ReadableStream({
+            start(controller) {
+              function pump() {
+                return reader.read().then(({ done, value }) => {
+                  if (done) {
+                    controller.close();
+                    return;
+                  }
+                  
+                  loaded += value.byteLength;
+                  if (total) {
+                    const progress = Math.round((loaded / total) * 20); // Use 20% for download
+                    updateLoading(`Downloading... ${formatFileSize(loaded)}/${formatFileSize(total)}`, progress);
+                  }
+                  
+                  controller.enqueue(value);
+                  return pump();
+                });
+              }
+              return pump();
+            }
+          });
+          
+          // Convert stream to blob
+          const streamResponse = new Response(stream);
+          const blob = await streamResponse.blob();
+          
           updateLoading('File downloaded, processing...', 25);
-          const blob = await response.blob();
           
           // Create a File object from the blob
           const file = new File([blob], filePath.split('/').pop(), {
@@ -902,12 +934,22 @@
           // Don't hide loading here - let handleFileData manage the loading state
           await handleFileData(file);
         } else {
-          const errorData = await response.json();
+          let errorData;
+          try {
+            errorData = await response.json();
+          } catch (e) {
+            errorData = { error: `HTTP ${response.status}: ${response.statusText}` };
+          }
           notificationPanel.innerHTML = `Error loading file: ${errorData.error}`;
           hideLoading();
         }
       } catch (error) {
-        notificationPanel.innerHTML = `Error loading file: ${error.message}`;
+        console.error('File loading error:', error);
+        if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+          notificationPanel.innerHTML = `Network error loading file. This might be due to the file size or proxy settings.`;
+        } else {
+          notificationPanel.innerHTML = `Error loading file: ${error.message}`;
+        }
         hideLoading();
       }
     }
@@ -934,9 +976,11 @@
       }
       if (!file.name.endsWith('.safetensors')) {
         notificationPanel.innerHTML = 'Please drop a valid .safetensors file.';
+        hideLoading();
         return;
       }
       try {
+        updateLoading('Parsing metadata...', 27);
         const arrayBuffer = await file.slice(0, 8).arrayBuffer(); // Read first 8 bytes
         const metadataSize = new DataView(arrayBuffer).getUint32(0, true); // Extract metadata size
         const metadataArrayBuffer = await file.slice(8, 8 + metadataSize).arrayBuffer(); // Read metadata chunk
@@ -946,6 +990,8 @@
         let metadata = {};
         if (!formattedMetadata) {
           notificationPanel.innerHTML = 'No metadata found';
+          hideLoading();
+          return;
         } else {
           for (const key in formattedMetadata) {
             if (typeof formattedMetadata[key] === 'string') {
@@ -959,9 +1005,14 @@
             }
           }
         }
+        
+        updateLoading('Setting up metadata...', 28);
         fileMetadata = metadata;
         updateMetadataEditor(formattedMetadata);
+        
+        updateLoading('Processing custom fields...', 29);
         setCustomMetadata();
+        
         updateMetadata(metadata);
         updateTagFrequency(metadata);
         updateTagFrequency(metadata,true);
@@ -970,6 +1021,7 @@
       } catch (error) {
         notificationPanel.innerHTML += 'Error parsing metadata.<br>';
         console.error('Error reading file:', error);
+        hideLoading();
       }
     }
 
@@ -1582,16 +1634,24 @@
       try {
           const objArray = JSON.parse(customFields.value);
           if (Array.isArray(objArray) && objArray.length > 0) {
-              const evaluatedObj = objArray.reduce((acc, obj) => {
+              const evaluatedObj = objArray.reduce((acc, obj, index) => {
                   if (typeof obj === 'object' && 'label' in obj && 'calc' in obj && typeof obj.calc === 'string') {
                       try{
+                        // Add timeout protection for eval operations
+                        const startTime = Date.now();
                         acc[obj.label] = eval(obj.calc);
+                        const evalTime = Date.now() - startTime;
+                        if (evalTime > 1000) {
+                          console.warn(`Custom field "${obj.label}" took ${evalTime}ms to evaluate`);
+                        }
                       }
                       catch(e) {
-                        if(obj.showError){
-                          console.warn(`Error evaluating expression for custom field "${obj.label}".`, obj, e);
+                        console.warn(`Error evaluating expression for custom field "${obj.label}".`, obj, e);
+                        // Don't show error in notification panel for server mode to avoid spam
+                        if(!isServerMode || obj.showError){
                           notificationPanel.innerHTML += `Error evaluating expression for custom field "${obj.label}".<br>`;
                         }
+                        acc[obj.label] = undefined; // Set to undefined instead of leaving blank
                       }
                       customMetadata[obj.label] = acc[obj.label];
                   } else {
@@ -1601,10 +1661,12 @@
               }, {});
               return evaluatedObj;
           } else {
-              throw new Error('Invalid JSON format or empty array.');
+              console.log('No custom fields defined or empty array.');
+              return {};
           }
       } catch (error) {
           console.error('Error evaluating expressions:', error.message);
+          notificationPanel.innerHTML += `Error processing custom fields: ${error.message}<br>`;
           return null;
       }
     }
