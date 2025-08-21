@@ -338,6 +338,13 @@
         <div class="notes" style="margin: 10px 0; padding: 8px; background-color: var(--vdtheme); border-radius: 5px;">
           ⚡ <strong>Fast Loading:</strong> Metadata is extracted on the server for .safetensors files, avoiding large downloads. Only metadata is transferred, making loading much faster!
         </div>
+        <div class="panel-option" style="margin: 10px 0;">
+          <input type="text" id="fileSearchInput" placeholder="🔍 Search files by name... (Ctrl+F)" style="width: 100%; padding: 8px; margin-bottom: 5px; border: 1px solid var(--theme);">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span id="fileSearchStats" class="notes"></span>
+            <button id="clearSearchBtn" class="settings-button" style="font-size: 0.9em; padding: 4px 8px; display: none;" title="Clear search (Esc)">✖ Clear</button>
+          </div>
+        </div>
         <div id="filesList" class="files-list"></div>
       </div>
     </div>
@@ -658,9 +665,13 @@
     const filesList = document.getElementById('filesList');
     const refreshFilesBtn = document.getElementById('refreshFilesBtn');
     const serverInfo = document.getElementById('serverInfo');
+    const fileSearchInput = document.getElementById('fileSearchInput');
+    const fileSearchStats = document.getElementById('fileSearchStats');
+    const clearSearchBtn = document.getElementById('clearSearchBtn');
     
     // Server state
     let serverFiles = [];
+    let filteredFiles = [];
     let selectedFileItem = null;
     let isServerMode = false;
     //#endregion Global Variables
@@ -674,6 +685,7 @@
       initCollapsible();
       initTabs();
       initServerMode();
+      initKeyboardShortcuts();
       [tagFrequencyCount, tagFrequencyFilter, tagExcludeFilter, tagExcludeFilterMethod, tagFrequencyFilterMethod].forEach(e=>{ e.addEventListener('change', updateTagFrequency); });
       tagByFolder.addEventListener('click', updateTagFrequency);
       [suggestedPromptCount, suggestedPromptFilter, suggestedPromptExcludeFilter, suggestedPromptExcludeFilterMethod, suggestedPromptFilterMethod].forEach(e=>{ e.addEventListener('change', ()=>{updateTagFrequency(null,true);}); });
@@ -817,6 +829,26 @@
       
       // Add event listeners for server UI
       refreshFilesBtn.addEventListener('click', loadServerFiles);
+      fileSearchInput.addEventListener('input', filterFiles);
+      clearSearchBtn.addEventListener('click', clearSearch);
+    }
+    
+    function initKeyboardShortcuts() {
+      document.addEventListener('keydown', (event) => {
+        // Ctrl+F to focus search (only in server mode)
+        if (isServerMode && event.ctrlKey && event.key === 'f') {
+          event.preventDefault();
+          if (fileSearchInput) {
+            fileSearchInput.focus();
+            fileSearchInput.select();
+          }
+        }
+        
+        // Escape to clear search (when search input is focused)
+        if (event.key === 'Escape' && document.activeElement === fileSearchInput) {
+          clearSearch();
+        }
+      });
     }
 
     async function loadServerFiles() {
@@ -827,7 +859,9 @@
         
         if (response.ok) {
           serverFiles = data.files;
+          filteredFiles = serverFiles; // Initialize filtered list
           renderFilesList();
+          updateSearchStats();
           serverInfo.textContent = `Found ${data.total} files in: ${data.directory}`;
         } else {
           serverInfo.textContent = `Error: ${data.error}`;
@@ -842,20 +876,41 @@
     }
 
     function renderFilesList() {
-      if (serverFiles.length === 0) {
-        filesList.innerHTML = '<div class="notes">No compatible files found</div>';
+      if (filteredFiles.length === 0) {
+        if (serverFiles.length === 0) {
+          filesList.innerHTML = '<div class="notes">No compatible files found</div>';
+        } else {
+          filesList.innerHTML = '<div class="notes">No files match your search</div>';
+        }
         return;
       }
 
-      const filesHtml = serverFiles.map(file => {
+      const searchTerm = fileSearchInput.value.toLowerCase().trim();
+      
+      const filesHtml = filteredFiles.map(file => {
         const sizeText = formatFileSize(file.size);
         const pathText = file.relative_path !== file.name ? file.relative_path : '';
+        
+        // Highlight search matches
+        let displayName = file.name;
+        let displayPath = pathText;
+        
+        if (searchTerm) {
+          const highlightText = (text, term) => {
+            if (!text || !term) return text;
+            const regex = new RegExp(`(${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+            return text.replace(regex, '<mark style="background-color: var(--link); color: white; padding: 1px 2px; border-radius: 2px;">$1</mark>');
+          };
+          
+          displayName = highlightText(file.name, searchTerm);
+          displayPath = highlightText(pathText, searchTerm);
+        }
         
         return `
           <div class="file-item" data-file-path="${file.relative_path}">
             <div>
-              <div class="file-name">${file.name}</div>
-              ${pathText ? `<div class="file-path">${pathText}</div>` : ''}
+              <div class="file-name">${displayName}</div>
+              ${displayPath ? `<div class="file-path">${displayPath}</div>` : ''}
             </div>
             <div class="file-size">${sizeText}</div>
           </div>
@@ -1685,6 +1740,43 @@
         console.error(error);
       }
     }
+    
+    // Filter functions for server files
+    function filterFiles() {
+      const searchTerm = fileSearchInput.value.toLowerCase().trim();
+      
+      if (searchTerm === '') {
+        filteredFiles = serverFiles;
+      } else {
+        filteredFiles = serverFiles.filter(file => 
+          file.name.toLowerCase().includes(searchTerm) ||
+          file.relative_path.toLowerCase().includes(searchTerm)
+        );
+      }
+      
+      renderFilesList();
+      updateSearchStats();
+    }
+    
+    function clearSearch() {
+      fileSearchInput.value = '';
+      filteredFiles = serverFiles;
+      renderFilesList();
+      updateSearchStats();
+      fileSearchInput.focus();
+    }
+    
+    function updateSearchStats() {
+      const searchTerm = fileSearchInput.value.trim();
+      if (searchTerm === '') {
+        fileSearchStats.textContent = `${serverFiles.length} files total`;
+        clearSearchBtn.style.display = 'none';
+      } else {
+        fileSearchStats.textContent = `${filteredFiles.length} of ${serverFiles.length} files match "${searchTerm}"`;
+        clearSearchBtn.style.display = 'inline-block';
+      }
+    }
+    
     //#endregion UI Events
     //#region Lora/Safetensors Utilities
     function setCustomMetadata(){
