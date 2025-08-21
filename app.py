@@ -6,6 +6,7 @@ Serves safetensors files from a specified directory and provides a web interface
 
 import os
 import json
+import struct
 from pathlib import Path
 from flask import Flask, render_template_string, jsonify, send_file, request
 from flask_cors import CORS
@@ -29,6 +30,54 @@ def get_file_info(file_path):
         }
     except Exception as e:
         print(f"Error getting file info for {file_path}: {e}")
+        return None
+
+def extract_safetensors_metadata(file_path):
+    """Extract metadata from a safetensors file"""
+    try:
+        with open(file_path, 'rb') as f:
+            # Read the first 8 bytes to get metadata size
+            header_bytes = f.read(8)
+            if len(header_bytes) < 8:
+                return None
+            
+            # Extract metadata size (little-endian uint32)
+            metadata_size = struct.unpack('<I', header_bytes[:4])[0]
+            
+            # Read the metadata
+            metadata_bytes = f.read(metadata_size)
+            if len(metadata_bytes) < metadata_size:
+                return None
+            
+            # Parse JSON header
+            header = json.loads(metadata_bytes.decode('utf-8'))
+            
+            # Extract the __metadata__ section
+            formatted_metadata = header.get('__metadata__', {})
+            
+            if not formatted_metadata:
+                return None
+            
+            # Process metadata - convert JSON strings to objects where applicable
+            metadata = {}
+            for key, value in formatted_metadata.items():
+                if isinstance(value, str):
+                    try:
+                        # Try to parse as JSON
+                        metadata[key] = json.loads(value)
+                    except (json.JSONDecodeError, ValueError):
+                        # If it fails, keep as string
+                        metadata[key] = value
+                else:
+                    metadata[key] = value
+            
+            return {
+                'metadata': metadata,
+                'formatted_metadata': formatted_metadata
+            }
+            
+    except Exception as e:
+        print(f"Error extracting metadata from {file_path}: {e}")
         return None
 
 @app.route('/')
@@ -123,6 +172,47 @@ def serve_file(filename):
     except Exception as e:
         print(f"Error serving file {filename}: {str(e)}")
         return jsonify({'error': f'Error serving file: {str(e)}'}), 500
+
+@app.route('/api/metadata/<path:filename>')
+def get_file_metadata(filename):
+    """Extract and return metadata from a specific safetensors file"""
+    if not FILES_DIR:
+        return jsonify({'error': 'Files directory not configured'}), 500
+    
+    try:
+        # Construct full path and ensure it's within FILES_DIR
+        file_path = os.path.join(FILES_DIR, filename)
+        file_path = os.path.abspath(file_path)
+        files_dir_abs = os.path.abspath(FILES_DIR)
+        
+        # Security check: ensure the file is within the allowed directory
+        if not file_path.startswith(files_dir_abs):
+            return jsonify({'error': 'Access denied'}), 403
+        
+        if not os.path.exists(file_path):
+            return jsonify({'error': 'File not found'}), 404
+        
+        # Check if it's a safetensors file
+        if not file_path.lower().endswith('.safetensors'):
+            return jsonify({'error': 'Only safetensors files are supported for metadata extraction'}), 400
+        
+        print(f"Extracting metadata from: {file_path}")
+        
+        # Extract metadata
+        result = extract_safetensors_metadata(file_path)
+        
+        if result is None:
+            return jsonify({'error': 'No metadata found or failed to parse metadata'}), 404
+        
+        # Add file info
+        file_info = get_file_info(file_path)
+        result['file_info'] = file_info
+        
+        return jsonify(result)
+    
+    except Exception as e:
+        print(f"Error extracting metadata from {filename}: {str(e)}")
+        return jsonify({'error': f'Error extracting metadata: {str(e)}'}), 500
 
 @app.route('/api/info')
 def server_info():

@@ -335,6 +335,9 @@
           <button id="refreshFilesBtn" class="settings-button">Refresh File List</button>
           <span id="serverInfo" class="notes"></span>
         </div>
+        <div class="notes" style="margin: 10px 0; padding: 8px; background-color: var(--vdtheme); border-radius: 5px;">
+          ⚡ <strong>Fast Loading:</strong> Metadata is extracted on the server for .safetensors files, avoiding large downloads. Only metadata is transferred, making loading much faster!
+        </div>
         <div id="filesList" class="files-list"></div>
       </div>
     </div>
@@ -882,6 +885,53 @@
 
     async function loadServerFile(filePath) {
       try {
+        // Check if it's a safetensors file and we're in server mode
+        if (filePath.toLowerCase().endsWith('.safetensors')) {
+          showLoading('Loading metadata from server...');
+          
+          // Fetch metadata directly from server
+          const metadataResponse = await fetch(`/api/metadata/${encodeURIComponent(filePath)}`);
+          
+          if (metadataResponse.ok) {
+            const metadataResult = await metadataResponse.json();
+            
+            // Create a mock file object for compatibility
+            const fileName = filePath.split('/').pop();
+            safetensorsFile = {
+              name: fileName,
+              serverPath: filePath,
+              size: metadataResult.file_info?.size || 0,
+              type: 'application/octet-stream',
+              isServerFile: true
+            };
+            
+            updateLoading('Processing metadata...', 50);
+            
+            // Process the metadata directly
+            fileMetadata = metadataResult.metadata;
+            updateMetadataEditor(metadataResult.formatted_metadata);
+            
+            updateLoading('Processing custom fields...', 70);
+            setCustomMetadata();
+            
+            updateMetadata(metadataResult.metadata);
+            updateTagFrequency(metadataResult.metadata);
+            updateTagFrequency(metadataResult.metadata, true);
+            updateSummary(metadataResult.metadata, civitaiMetadata, customMetadata);
+            updateCivitAiInfo(safetensorsFile);
+            
+            hideLoading();
+            notificationPanel.innerHTML = `Loaded metadata for: ${fileName}`;
+            return;
+          } else {
+            // If metadata extraction fails, fall back to downloading the entire file
+            const errorData = await metadataResponse.json().catch(() => ({}));
+            console.warn('Server metadata extraction failed:', errorData.error);
+            notificationPanel.innerHTML = 'Server metadata extraction failed, downloading file...';
+          }
+        }
+        
+        // Fall back to downloading the entire file (for .gguf files or if metadata extraction failed)
         showLoading('Downloading file...');
         
         const response = await fetch(`/api/file/${encodeURIComponent(filePath)}`);
@@ -1580,6 +1630,13 @@
 
     function downloadFile(purge) {
       editorNotificationPanel.innerHTML = '';
+      
+      // Check if this is a server file that wasn't fully downloaded
+      if (safetensorsFile?.isServerFile) {
+        editorNotificationPanel.innerHTML = 'Cannot edit server files. Please download the entire file first using the original download method to enable editing.';
+        return;
+      }
+      
       let newMetadata;
       try {
         newMetadata = metadataEditor.value && !purge ? JSON.parse(metadataEditor.value) : {};
@@ -1707,19 +1764,25 @@
       }
       if(file){
         try{
-          const TWO_GB = 2 * 1024 * 1024 * 1024;
-          updateLoading('Calculating AutoV2 hash...', 35);
-          if (file.size > TWO_GB) {
-            
-            autov2 = await calculateHashInChunks(file);
-            autov2 = autov2.substring(0,10);
-          }
-          else {
-            autov2 = await calculateFileHash(file);
-            autov2 = autov2.substring(0,10);
-            updateLoading('Calculating AutoV3 hash...', 60);
-            autov3 = await calculateAutoV3Hash(file);
-            autov3 = autov3.substring(0,12);
+          // Check if this is a server file that wasn't fully downloaded
+          if (file.isServerFile) {
+            updateLoading('Skipping hash calculation for server files...', 60);
+            notificationPanel.innerHTML += 'Hash calculation skipped for server-loaded files. ';
+          } else {
+            const TWO_GB = 2 * 1024 * 1024 * 1024;
+            updateLoading('Calculating AutoV2 hash...', 35);
+            if (file.size > TWO_GB) {
+              
+              autov2 = await calculateHashInChunks(file);
+              autov2 = autov2.substring(0,10);
+            }
+            else {
+              autov2 = await calculateFileHash(file);
+              autov2 = autov2.substring(0,10);
+              updateLoading('Calculating AutoV3 hash...', 60);
+              autov3 = await calculateAutoV3Hash(file);
+              autov3 = autov3.substring(0,12);
+            }
           }
         } catch(error){
           if (error.message === 'Unable to read the file.') 
