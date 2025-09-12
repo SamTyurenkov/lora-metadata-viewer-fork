@@ -80,6 +80,63 @@ def extract_safetensors_metadata(file_path):
         print(f"Error extracting metadata from {file_path}: {e}")
         return None
 
+def update_safetensors_metadata(file_path, new_metadata):
+    """Update metadata in a safetensors file"""
+    try:
+        # Read the entire file
+        with open(file_path, 'rb') as f:
+            file_data = f.read()
+        
+        # Parse the header to get the structure
+        header_bytes = file_data[:8]
+        if len(header_bytes) < 8:
+            return False
+        
+        metadata_size = struct.unpack('<I', header_bytes[:4])[0]
+        metadata_bytes = file_data[8:8+metadata_size]
+        
+        if len(metadata_bytes) < metadata_size:
+            return False
+        
+        # Parse the existing header
+        header = json.loads(metadata_bytes.decode('utf-8'))
+        
+        # Convert new metadata to the format expected by safetensors
+        formatted_metadata = {}
+        for key, value in new_metadata.items():
+            if isinstance(value, (dict, list)):
+                # Convert complex objects to JSON strings
+                formatted_metadata[key] = json.dumps(value)
+            else:
+                formatted_metadata[key] = value
+        
+        # Update the __metadata__ section
+        header['__metadata__'] = formatted_metadata
+        
+        # Serialize the new header
+        new_header_json = json.dumps(header, separators=(',', ':'))
+        new_header_bytes = new_header_json.encode('utf-8')
+        new_metadata_size = len(new_header_bytes)
+        
+        # Create new header with size
+        new_header_with_size = struct.pack('<I', new_metadata_size) + b'\x00\x00\x00\x00' + new_header_bytes
+        
+        # Get the tensor data (everything after the original metadata)
+        tensor_data = file_data[8+metadata_size:]
+        
+        # Create the new file content
+        new_file_data = new_header_with_size + tensor_data
+        
+        # Write the updated file
+        with open(file_path, 'wb') as f:
+            f.write(new_file_data)
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error updating metadata in {file_path}: {e}")
+        return False
+
 @app.route('/')
 def index():
     """Serve the main HTML page"""
@@ -213,6 +270,59 @@ def get_file_metadata(filename):
     except Exception as e:
         print(f"Error extracting metadata from {filename}: {str(e)}")
         return jsonify({'error': f'Error extracting metadata: {str(e)}'}), 500
+
+@app.route('/api/metadata/<path:filename>', methods=['PUT'])
+def update_file_metadata(filename):
+    """Update metadata in a specific safetensors file"""
+    if not FILES_DIR:
+        return jsonify({'error': 'Files directory not configured'}), 500
+    
+    try:
+        # Construct full path and ensure it's within FILES_DIR
+        file_path = os.path.join(FILES_DIR, filename)
+        file_path = os.path.abspath(file_path)
+        files_dir_abs = os.path.abspath(FILES_DIR)
+        
+        # Security check: ensure the file is within the allowed directory
+        if not file_path.startswith(files_dir_abs):
+            return jsonify({'error': 'Access denied'}), 403
+        
+        if not os.path.exists(file_path):
+            return jsonify({'error': 'File not found'}), 404
+        
+        # Check if it's a safetensors file
+        if not file_path.lower().endswith('.safetensors'):
+            return jsonify({'error': 'Only safetensors files are supported for metadata updates'}), 400
+        
+        # Get the new metadata from the request
+        request_data = request.get_json()
+        if not request_data or 'metadata' not in request_data:
+            return jsonify({'error': 'No metadata provided'}), 400
+        
+        new_metadata = request_data['metadata']
+        
+        print(f"Updating metadata in: {file_path}")
+        
+        # Update the metadata in the file
+        success = update_safetensors_metadata(file_path, new_metadata)
+        
+        if not success:
+            return jsonify({'error': 'Failed to update metadata'}), 500
+        
+        # Return the updated metadata
+        result = extract_safetensors_metadata(file_path)
+        if result is None:
+            return jsonify({'error': 'Failed to read updated metadata'}), 500
+        
+        # Add file info
+        file_info = get_file_info(file_path)
+        result['file_info'] = file_info
+        
+        return jsonify(result)
+    
+    except Exception as e:
+        print(f"Error updating metadata in {filename}: {str(e)}")
+        return jsonify({'error': f'Error updating metadata: {str(e)}'}), 500
 
 @app.route('/api/info')
 def server_info():

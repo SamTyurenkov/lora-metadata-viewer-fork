@@ -83,6 +83,22 @@
     .file-name { font-weight: bold; flex-grow: 1; }
     .file-size { font-size: 0.8em; color: var(--datatxt); margin-left: 10px; }
     .file-path { font-size: 0.7em; color: var(--datatxt); font-style: italic; }
+    
+    /* Modal styles */
+    .modal { display: none; position: fixed; z-index: 2000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); }
+    .modal-content { background-color: var(--bg); margin: 5% auto; padding: 20px; border-radius: 10px; width: 80%; max-width: 800px; max-height: 80vh; overflow-y: auto; }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .modal-title { font-size: 1.5em; font-weight: bold; color: var(--vltheme); }
+    .close { color: var(--vltheme); font-size: 28px; font-weight: bold; cursor: pointer; }
+    .close:hover { color: var(--error); }
+    .modal-body { margin-bottom: 20px; }
+    .modal-footer { display: flex; justify-content: flex-end; gap: 10px; }
+    .modal textarea { width: 100%; height: 400px; font-family: monospace; font-size: 14px; }
+    .modal button { padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-size: 1em; }
+    .modal .btn-primary { background-color: var(--link); color: white; }
+    .modal .btn-primary:hover { background-color: #3d8bf7; }
+    .modal .btn-secondary { background-color: var(--ltheme); color: var(--vltheme); }
+    .modal .btn-secondary:hover { background-color: var(--theme); }
   </style>
 </head>
 <body class="dark-theme">
@@ -295,10 +311,6 @@
               
             </textarea>
           </div>
-          <div id="tab3" class="tabcontent">
-            <div><span class="section-header">Metadata Editor Fields</span><br><span class="notes">Specify the name of the fields to be displayed in the simple view of the metadata editor section, separated by commas.</span></div>
-            <textarea id="editorFields" class="settings-field" rows="8" cols="100" spellcheck="false"></textarea>
-          </div>
           <div id="tab4" class="tabcontent">
             <div><span class="section-header">Custom Fields</span><br><span class="notes">This section defines the list of custom fields that may be displayed in the summary section. Calculations are defined as javascript expressions. Data from the following are available for calculations: Safetensors File metadata (fileMetadata), CivitAI resource info (civitaiMetadata), and previously defined custom fields (customMetadata). Keep in mind that custom fields are created in the same order they are defined in the list, meaning you may use a custom field in a calculation only if it was defined in a previous row.</span></div>
             <table class="editable-list">
@@ -489,6 +501,7 @@
       <h3 class="collapsible">Metadata</h3>
       <div class="content">
         <button class="copy-btn" onclick="copyToClipboard('metadataDisplay',event)">Copy to clipboard</button>
+        <button class="copy-btn" onclick="openEditModal()" style="right: 80px;">Edit JSON</button>
         <pre id="metadataDisplay" class="json-data"></pre>
       </div>
     </div>
@@ -496,24 +509,11 @@
     <div id="metadataEditorPanel">
       <h3 class="collapsible">Metadata Editor</h3>
       <div class="content">
-        <div class="panel-option" >
-          <label class="section-header" for="editorFormat">Layout: </label>
-          <select id="editorFormat" class="settings-field" data-select-toggle>
-            <option value="manual">Manual</option>
-            <option value="simple">Simple</option>
-          </select>
-        </div>
-        <div id="editorHeader" class="editor-header" style="display: none;">
-          <button onclick="downloadFile()">Update & Download</button>
-          <button onclick="downloadFile(true)">Purge & Download</button>
+        <div id="editorHeader" class="editor-header">
+          <button onclick="saveMetadataFromEditor()">Save Changes</button>
         </div>
         <div id="editorNotificationPanel"></div>
-        <textarea id="metadataEditor" spellcheck="false" rows="100" cols="100" data-toggle-target="editorFormat" data-toggle-value="manual"></textarea>
-        <div class="summary-table" data-toggle-target="editorFormat" data-toggle-value="simple">
-          <table>
-            <tbody id="metadataEditorSimple"></tbody>
-          </table>
-        </div>
+        <textarea id="metadataEditor" spellcheck="false" rows="100" cols="100"></textarea>
       </div>
     </div>
   </div>
@@ -523,6 +523,23 @@
     LoRA Metadata Viewer v1.6 |
     <a href="https://github.com/Xypher7/lora-metadata-viewer" target='_blank'>GitHub</a> |
     <a href="https://civitai.com/models/249721" target='_blank'>CivitAI</a>
+  </div>
+
+  <!-- Edit Metadata Modal -->
+  <div id="editModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title">Edit Metadata JSON</h2>
+        <span class="close" onclick="closeEditModal()">&times;</span>
+      </div>
+      <div class="modal-body">
+        <textarea id="editMetadataTextarea" placeholder="Enter JSON metadata here..."></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeEditModal()">Cancel</button>
+        <button class="btn-primary" onclick="saveMetadata()">Save Changes</button>
+      </div>
+    </div>
   </div>
 
   <!-- Loading Animation Div -->
@@ -548,7 +565,6 @@
 
     const defaults = {};
     defaults.summaryFields = "ss_output_name,ss_sd_model_name,ss_network_module,custom.batch_size,ss_gradient_accumulation_steps,custom.resolution,ss_optimizer,ss_lr_scheduler,ss_network_module,ss_clip_skip,ss_network_dim,ss_network_alpha,ss_network_args,ss_epoch,ss_num_epochs,ss_steps,ss_max_train_steps,ss_learning_rate,ss_text_encoder_lr,ss_unet_lr,ss_noise_offset,ss_adaptive_noise_scale,ss_min_snr_gamma,sshs_model_hash,custom.training_time,custom.training_start_time,custom.training_end_time,custom.lora_hash,custom.lora_hash_type,custom.civitai_url,ss_dataset_dirs,civitai.trainedWords";
-    defaults.editorFields = "ss_output_name,ss_training_comment";
     defaults.suggestedPromptCount = 10;
     defaults.suggestedPromptExcludeFilter = "1girl,1boy,background,standing,portrait,cowboy shot,upper body,looking at viewer,solo,smile,open mouth,closed mouth,blush,nude,nipples,anime,male focus";
     defaults.suggestedPromptExcludeFilterMethod = 'partial';
@@ -607,8 +623,6 @@
     const editorHeader = document.getElementById('editorHeader');
     
     const summaryFields = document.getElementById('summaryFields');
-    const editorFields = document.getElementById('editorFields');
-    const editorFormat = document.getElementById('editorFormat');
     const showUndefinedSummaryValues = document.getElementById('showUndefinedSummaryValues');
     const customFields = document.getElementById('customFields');
     const customTemplate = document.getElementById('customTemplate');
@@ -677,7 +691,6 @@
       tagByFolder.addEventListener('click', updateTagFrequency);
       [suggestedPromptCount, suggestedPromptFilter, suggestedPromptExcludeFilter, suggestedPromptExcludeFilterMethod, suggestedPromptFilterMethod].forEach(e=>{ e.addEventListener('change', ()=>{updateTagFrequency(null,true);}); });
       suggestedPromptByFolder.addEventListener('click', ()=>{updateTagFrequency(null,true);});
-      editorFormat.addEventListener('change', updateEditorFields);
       if(window.matchMedia && !window.matchMedia('(prefers-color-scheme: dark)').matches) darkMode.checked = !darkMode.checked;
     }
 
@@ -893,6 +906,7 @@
             safetensorsFile = {
               name: fileName,
               serverPath: filePath,
+              relative_path: filePath, // Set the relative path for saving
               size: metadataResult.file_info?.size || 0,
               type: 'application/octet-stream',
               isServerFile: true
@@ -972,6 +986,7 @@
           // Set the file name for display
           safetensorsFile = file;
           safetensorsFile.serverPath = filePath;
+          safetensorsFile.relative_path = filePath; // Set the relative path for saving
           
           // Process the file using existing handleFile logic
           // Don't hide loading here - let handleFileData manage the loading state
@@ -1240,10 +1255,32 @@
 
     function updateMetadataEditor(metadata) {
       if(enableMetadataEditor.checked) {
-        metadataEditor.value = metadata? JSON.stringify(metadata, null, 2): '';
+        // Clean the metadata for display - unescape JSON strings
+        const cleanMetadata = cleanMetadataForDisplay(metadata);
+        metadataEditor.value = cleanMetadata? JSON.stringify(cleanMetadata, null, 2): '';
         editorHeader.style.display = "";
-        updateEditorFields();
       }
+    }
+    
+    function cleanMetadataForDisplay(metadata) {
+      if (!metadata) return metadata;
+      
+      const cleaned = {};
+      for (const [key, value] of Object.entries(metadata)) {
+        if (typeof value === 'string') {
+          // Try to parse as JSON to unescape it
+          try {
+            const parsed = JSON.parse(value);
+            cleaned[key] = parsed;
+          } catch (e) {
+            // If it's not valid JSON, keep as string
+            cleaned[key] = value;
+          }
+        } else {
+          cleaned[key] = value;
+        }
+      }
+      return cleaned;
     }
 
     function updateSummary(metadata, civitaiMetadata, customMetadata) {     
@@ -1582,31 +1619,6 @@
       }
     }
 
-    function updateEditorFields() {
-      if(editorFormat.value!=='simple') return;
-      const container = metadataEditorSimple; 
-      container.innerHTML = '';
-      if(!editorFields.value || !metadataEditor.value) return;
-      const fieldNames = editorFields.value.split(',').map(field => field.trim());
-      let metadata = JSON.parse(metadataEditor.value) || {};
-      let htmlContent = '';
-      const idPrefix = 'editor_';
-      fieldNames.forEach(fieldName => {
-          const value = metadata[fieldName] || '';
-          htmlContent += `<tr>
-              <td><label for="${idPrefix}${fieldName}">${fieldName}: </label></td>
-              <td><input type="text" id="${idPrefix}${fieldName}" name="${fieldName}" value="${value}"></td>
-              </tr>`;
-      });
-      container.innerHTML = htmlContent;
-      fieldNames.forEach(fieldName => {
-          document.getElementById(idPrefix+fieldName).addEventListener('change', function(event) {
-            let metadata = JSON.parse(metadataEditor.value) || {};
-            metadata[fieldName] = event.target.value;
-            metadataEditor.value = JSON.stringify(metadata, null, 2);
-          });
-      });
-    }
 
     //#endregion UI Rendering
     //#region UI Actions
@@ -1621,61 +1633,55 @@
       showTooltip('Copied!', event);
     }
 
-    function downloadFile(purge) {
+    async function saveMetadataFromEditor() {
       editorNotificationPanel.innerHTML = '';
       
-      // Check if this is a server file that wasn't fully downloaded
-      if (safetensorsFile?.isServerFile) {
-        editorNotificationPanel.innerHTML = 'Cannot edit server files. Please download the entire file first using the original download method to enable editing.';
-        return;
-      }
-      
-      let newMetadata;
       try {
-        newMetadata = metadataEditor.value && !purge ? JSON.parse(metadataEditor.value) : {};
-        const validateJsonString = (obj, name) => {
-          try{
-            obj && typeof obj === 'string' && JSON.parse(obj);
-          }catch(e){
-            editorNotificationPanel.innerHTML = `Error parsing edited metadata field '${name}'. Ensure the field value is a valid JSON string and try again.`;
-            throw e;
-          }     
-        };
-        !purge && ['ss_dataset_dirs', 'ss_bucket_info', 'ss_tag_frequency'].forEach((f) => { validateJsonString(newMetadata[f], f); });
-      } catch (e) {
-        editorNotificationPanel.innerHTML = editorNotificationPanel.innerHTML || "Error parsing edited metadata. Ensure the metadata is in valid JSON format and try again.";
-        return;
-      }
-
-      try{
-        const reader = new FileReader();
-  
-        reader.onload = ({ target: { result } }) => {
-          const metadataSize = new DataView(result).getUint32(0, true);
-          const header = JSON.parse(new TextDecoder().decode(result.slice(8, 8 + metadataSize)));
-          // Update metadata
-          header['__metadata__'] = newMetadata;
-          const newHeaderBytes = new TextEncoder().encode(JSON.stringify(header));
-          // Create new ArrayBuffer only once
-          const newFileArrayBuffer = new Uint8Array(newHeaderBytes.length + result.byteLength - metadataSize);
-          new DataView(newFileArrayBuffer.buffer).setUint32(0, newHeaderBytes.length, true);
-          newFileArrayBuffer.set(newHeaderBytes, 8);
-          newFileArrayBuffer.set(new Uint8Array(result, 8 + metadataSize), 8 + newHeaderBytes.length);
-          // Create and download Blob
-          const blob = new Blob([newFileArrayBuffer], { type: "application/octet-stream" });
-          const url = URL.createObjectURL(blob);
-          const downloadLink = document.createElement("a");
-          downloadLink.href = url;
-          downloadLink.download = safetensorsFile.name.replace(/(\.[^.]+)$/, `_${purge ? "purged" : "edited"}$1`);
-          downloadLink.click();
-          URL.revokeObjectURL(url);
-          alert(`Metadata ${purge ? "purged" : "updated"} successfully!`);
-        };
-
-        reader.readAsArrayBuffer(safetensorsFile);
+        // Validate JSON first
+        const newMetadata = JSON.parse(metadataEditor.value);
+        
+        // Check if we're in server mode and have a server file
+        if (safetensorsFile?.isServerFile) {
+          // Debug: log the path being used
+          console.log('Saving metadata to:', safetensorsFile.relative_path);
+          
+          // Save to server - the backend will handle proper escaping
+          const response = await fetch(`/api/metadata/${safetensorsFile.relative_path}`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ metadata: newMetadata })
+          });
+          
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || `Server error: ${response.statusText}`);
+          }
+          
+          // Update local metadata with the response from server
+          const result = await response.json();
+          fileMetadata = result.metadata;
+          updateMetadata(fileMetadata);
+          
+          editorNotificationPanel.innerHTML = 'Metadata saved successfully!';
+          editorNotificationPanel.style.color = 'var(--string)';
+        } else {
+          // For local files, just update the display
+          fileMetadata = newMetadata;
+          updateMetadata(fileMetadata);
+          
+          editorNotificationPanel.innerHTML = 'Metadata updated! (Note: Changes are not saved to file)';
+          editorNotificationPanel.style.color = 'var(--number)';
+        }
+        
       } catch (error) {
-        editorNotificationPanel.innerHTML = "An error occured while updating the file.";
-        console.error(error);
+        if (error instanceof SyntaxError) {
+          editorNotificationPanel.innerHTML = 'Invalid JSON: ' + error.message;
+        } else {
+          editorNotificationPanel.innerHTML = 'Error: ' + error.message;
+        }
+        editorNotificationPanel.style.color = 'var(--error)';
       }
     }
     
@@ -1937,6 +1943,101 @@
         return finalHashHex;  // Return the final hash as a hex string
     }
     //#endregion Encryption Utilities
+    
+    //#region Modal Functions
+    function openEditModal() {
+      const modal = document.getElementById('editModal');
+      const textarea = document.getElementById('editMetadataTextarea');
+      
+      // Get current metadata and populate the textarea with clean JSON
+      if (fileMetadata && Object.keys(fileMetadata).length > 0) {
+        const cleanMetadata = cleanMetadataForDisplay(fileMetadata);
+        textarea.value = JSON.stringify(cleanMetadata, null, 2);
+      } else {
+        textarea.value = '{}';
+      }
+      
+      modal.style.display = 'block';
+      textarea.focus();
+    }
+    
+    function closeEditModal() {
+      const modal = document.getElementById('editModal');
+      modal.style.display = 'none';
+    }
+    
+    async function saveMetadata() {
+      const textarea = document.getElementById('editMetadataTextarea');
+      const modal = document.getElementById('editModal');
+      
+      try {
+        // Validate JSON first
+        const newMetadata = JSON.parse(textarea.value);
+        
+        // Check if we're in server mode and have a server file
+        if (safetensorsFile?.isServerFile) {
+          // Debug: log the path being used
+          console.log('Saving metadata to:', safetensorsFile.relative_path);
+          
+          // Save to server - the backend will handle proper escaping
+          const response = await fetch(`/api/metadata/${safetensorsFile.relative_path}`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ metadata: newMetadata })
+          });
+          
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || `Server error: ${response.statusText}`);
+          }
+          
+          // Update local metadata with the response from server
+          const result = await response.json();
+          fileMetadata = result.metadata;
+          updateMetadata(fileMetadata);
+          updateMetadataEditor(fileMetadata);
+          
+          closeEditModal();
+          showTooltip('Metadata saved successfully!', null, 2000);
+        } else {
+          // For local files, update the metadata display
+          fileMetadata = newMetadata;
+          updateMetadata(fileMetadata);
+          updateMetadataEditor(fileMetadata);
+          
+          closeEditModal();
+          showTooltip('Metadata updated! (Note: Changes are not saved to file)', null, 2000);
+        }
+        
+      } catch (error) {
+        if (error instanceof SyntaxError) {
+          alert('Invalid JSON: ' + error.message);
+        } else {
+          alert('Error: ' + error.message);
+        }
+      }
+    }
+    
+    // Close modal when clicking outside of it
+    window.onclick = function(event) {
+      const modal = document.getElementById('editModal');
+      if (event.target === modal) {
+        closeEditModal();
+      }
+    }
+    
+    // Close modal with Escape key
+    document.addEventListener('keydown', function(event) {
+      if (event.key === 'Escape') {
+        const modal = document.getElementById('editModal');
+        if (modal.style.display === 'block') {
+          closeEditModal();
+        }
+      }
+    });
+    //#endregion Modal Functions
   </script>
 </body>
 </html>
