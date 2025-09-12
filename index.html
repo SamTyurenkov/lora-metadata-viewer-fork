@@ -686,7 +686,6 @@
       initCollapsible();
       initTabs();
       initServerMode();
-      initKeyboardShortcuts();
       [tagFrequencyCount, tagFrequencyFilter, tagExcludeFilter, tagExcludeFilterMethod, tagFrequencyFilterMethod].forEach(e=>{ e.addEventListener('change', updateTagFrequency); });
       tagByFolder.addEventListener('click', updateTagFrequency);
       [suggestedPromptCount, suggestedPromptFilter, suggestedPromptExcludeFilter, suggestedPromptExcludeFilterMethod, suggestedPromptFilterMethod].forEach(e=>{ e.addEventListener('change', ()=>{updateTagFrequency(null,true);}); });
@@ -782,24 +781,6 @@
       refreshFilesBtn.addEventListener('click', loadServerFiles);
       fileSearchInput.addEventListener('input', filterFiles);
       clearSearchBtn.addEventListener('click', clearSearch);
-    }
-    
-    function initKeyboardShortcuts() {
-      document.addEventListener('keydown', (event) => {
-        // Ctrl+F to focus search (only in server mode)
-        if (isServerMode && event.ctrlKey && event.key === 'f') {
-          event.preventDefault();
-          if (fileSearchInput) {
-            fileSearchInput.focus();
-            fileSearchInput.select();
-          }
-        }
-        
-        // Escape to clear search (when search input is focused)
-        if (event.key === 'Escape' && document.activeElement === fileSearchInput) {
-          clearSearch();
-        }
-      });
     }
 
     async function loadServerFiles() {
