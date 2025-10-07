@@ -907,6 +907,11 @@
             updateTagFrequency(metadataResult.metadata);
             updateTagFrequency(metadataResult.metadata, true);
             updateSummary(metadataResult.metadata, civitaiMetadata, customMetadata);
+            
+            // Pass hashes from server for CivitAI lookup
+            if (metadataResult.hashes) {
+              safetensorsFile.serverHashes = metadataResult.hashes;
+            }
             updateCivitAiInfo(safetensorsFile);
             
             hideLoading();
@@ -1784,8 +1789,15 @@
         try{
           // Check if this is a server file that wasn't fully downloaded
           if (file.isServerFile) {
-            updateLoading('Skipping hash calculation for server files...', 60);
-            notificationPanel.innerHTML += 'Hash calculation skipped for server-loaded files. ';
+            updateLoading('Using server-provided hashes...', 60);
+            // Use hashes provided by the server
+            if (file.serverHashes) {
+              autov2 = file.serverHashes.AutoV2;
+              autov3 = file.serverHashes.AutoV3;
+              notificationPanel.innerHTML += 'Using server-calculated hashes for CivitAI lookup. ';
+            } else {
+              notificationPanel.innerHTML += 'No hashes available for server-loaded file. ';
+            }
           } else {
             const TWO_GB = 2 * 1024 * 1024 * 1024;
             updateLoading('Calculating AutoV2 hash...', 35);

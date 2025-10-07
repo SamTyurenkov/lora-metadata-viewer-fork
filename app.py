@@ -7,6 +7,7 @@ Serves safetensors files from a specified directory and provides a web interface
 import os
 import json
 import struct
+import hashlib
 from pathlib import Path
 from flask import Flask, render_template_string, jsonify, send_file, request
 from flask_cors import CORS
@@ -30,6 +31,67 @@ def get_file_info(file_path):
         }
     except Exception as e:
         print(f"Error getting file info for {file_path}: {e}")
+        return None
+
+def calculate_file_hash_autov2(file_path, max_size_gb=2):
+    """
+    Calculate AutoV2 hash (SHA256 of entire file) with size limit.
+    For files > max_size_gb, calculates hash in chunks.
+    Returns first 10 characters of the hex hash.
+    """
+    try:
+        file_size = os.path.getsize(file_path)
+        max_size_bytes = max_size_gb * 1024 * 1024 * 1024
+        
+        sha256_hash = hashlib.sha256()
+        
+        with open(file_path, 'rb') as f:
+            # Read file in chunks to handle large files
+            chunk_size = 8192 * 1024  # 8MB chunks
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                sha256_hash.update(chunk)
+        
+        return sha256_hash.hexdigest()[:10]
+    except Exception as e:
+        print(f"Error calculating AutoV2 hash for {file_path}: {e}")
+        return None
+
+def calculate_file_hash_autov3(file_path):
+    """
+    Calculate AutoV3 hash (SHA256 of specific 0x100000 byte blocks).
+    This matches CivitAI's AutoV3 hash calculation.
+    Returns first 12 characters of the hex hash.
+    """
+    try:
+        file_size = os.path.getsize(file_path)
+        block_size = 0x100000  # 1MB blocks
+        
+        sha256_hash = hashlib.sha256()
+        
+        with open(file_path, 'rb') as f:
+            # Read first block
+            first_block = f.read(block_size)
+            sha256_hash.update(first_block)
+            
+            # If file is larger than 2 blocks, read middle and end blocks
+            if file_size > block_size * 2:
+                # Seek to middle block
+                middle_pos = (file_size // 2) - (block_size // 2)
+                f.seek(middle_pos)
+                middle_block = f.read(block_size)
+                sha256_hash.update(middle_block)
+                
+                # Seek to last block
+                f.seek(-block_size, 2)  # 2 means from end of file
+                last_block = f.read(block_size)
+                sha256_hash.update(last_block)
+        
+        return sha256_hash.hexdigest()[:12]
+    except Exception as e:
+        print(f"Error calculating AutoV3 hash for {file_path}: {e}")
         return None
 
 def extract_safetensors_metadata(file_path):
@@ -264,6 +326,18 @@ def get_file_metadata(filename):
         # Add file info
         file_info = get_file_info(file_path)
         result['file_info'] = file_info
+        
+        # Calculate hashes for CivitAI lookup
+        print("Calculating file hashes for CivitAI lookup...")
+        autov2_hash = calculate_file_hash_autov2(file_path)
+        autov3_hash = calculate_file_hash_autov3(file_path)
+        
+        result['hashes'] = {
+            'AutoV2': autov2_hash,
+            'AutoV3': autov3_hash
+        }
+        
+        print(f"Hashes calculated - AutoV2: {autov2_hash}, AutoV3: {autov3_hash}")
         
         return jsonify(result)
     
