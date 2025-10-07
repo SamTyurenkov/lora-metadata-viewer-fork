@@ -871,6 +871,7 @@
     }
 
     async function loadServerFile(filePath) {
+      clearAll();
       try {
         // Check if it's a safetensors file and we're in server mode
         if (filePath.toLowerCase().endsWith('.safetensors')) {
