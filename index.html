@@ -607,7 +607,7 @@
       {"label":"file_hash","calc":"customMetadata?.lora_hash.toUpperCase() + (customMetadata?.lora_hash_type?` (${customMetadata?.lora_hash_type})`:'')"},
       {"label":"creator","calc":"civitaiMetadata?.model ? `<a href='https://civitai.com/user/${civitaiMetadata?.model?.creator.username}' target='_blank'><span>${civitaiMetadata?.model?.creator.username}</span><img alt='' src='${civitaiMetadata?.model?.creator.image}' style='border-radius: 50%; float:right; width:80px; margin-top:-20px;'></img></a>`: undefined"},
       {"label":"civitai_name","calc":"customMetadata.civitai_url ? `<a target='_blank' href='${customMetadata.civitai_url}'>${civitaiMetadata?.model?.name}</a>` : undefined"},
-      {"label":"civitai_description","calc":"civitaiMetadata?.model?.description || civitaiMetadata?.description || undefined"},
+      {"label":"civitai_description","calc":"(function(){ const modelDesc = civitaiMetadata?.model?.description; const versionDesc = civitaiMetadata?.description; if (modelDesc && versionDesc) return versionDesc + '<hr style=\"margin: 1em 0; border: 1px solid #ccc;\">' + modelDesc; return modelDesc || versionDesc || undefined; })()"},
     ];
     
     const metadataDisplay = document.getElementById('metadataDisplay');
@@ -1577,6 +1577,11 @@
         
         // Special handling for civitai_description - render as raw HTML
         if (placeholder === 'custom.civitai_description' && value && typeof value === 'string') {
+          return value; // Return raw HTML without escaping
+        }
+        
+        // Special handling for preview - render as raw HTML (for video/image tags)
+        if (placeholder === 'custom.preview' && value && typeof value === 'string') {
           return value; // Return raw HTML without escaping
         }
         
