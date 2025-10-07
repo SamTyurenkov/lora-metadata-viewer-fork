@@ -574,6 +574,33 @@
     defaults.suggestedPromptExcludeFilter = "1girl,1boy,background,standing,portrait,cowboy shot,upper body,looking at viewer,solo,smile,open mouth,closed mouth,blush,nude,nipples,anime,male focus";
     defaults.suggestedPromptExcludeFilterMethod = 'partial';
     defaults.suggestedPromptByFolder = "true";
+    
+    // Helper functions for preview generation (defined early so they can be used in customFields)
+    function isVideoUrl(url) {
+      if (!url) return false;
+      const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.mkv'];
+      const lowerUrl = url.toLowerCase();
+      return videoExtensions.some(ext => lowerUrl.includes(ext));
+    }
+    
+    function createPreviewElement(url, civitaiUrl = null) {
+      console.log('createPreviewElement called with url:', url);
+      if (!url) return '';
+      
+      const isVideo = isVideoUrl(url);
+      console.log('isVideo:', isVideo);
+      const mediaStyle = 'max-width: 100%; display: block; height: auto;';
+      const linkStyle = 'display: inline-block; max-width: 100%;';
+      
+      if (isVideo) {
+        const videoHtml = `<video controls autoplay loop muted style="${mediaStyle}"><source src="${url}" type="video/mp4">Your browser does not support the video tag.</video>`;
+        return civitaiUrl ? `<a target='_blank' href='${civitaiUrl}' style='${linkStyle}'>${videoHtml}</a>` : videoHtml;
+      } else {
+        const imgHtml = `<img src='${url}' style='${mediaStyle}'>`;
+        return civitaiUrl ? `<a target='_blank' href='${civitaiUrl}' style='${linkStyle}'>${imgHtml}</a>` : imgHtml;
+      }
+    }
+    
     defaults.customFields = [
       {"label":"training_start_time","calc":"new Date(fileMetadata.ss_training_started_at * 1000)"},
       {"label":"training_end_time","calc":"new Date(fileMetadata.ss_training_finished_at * 1000)"},
@@ -607,7 +634,7 @@
       {"label":"file_hash","calc":"customMetadata?.lora_hash.toUpperCase() + (customMetadata?.lora_hash_type?` (${customMetadata?.lora_hash_type})`:'')"},
       {"label":"creator","calc":"civitaiMetadata?.model ? `<a href='https://civitai.com/user/${civitaiMetadata?.model?.creator.username}' target='_blank'><span>${civitaiMetadata?.model?.creator.username}</span><img alt='' src='${civitaiMetadata?.model?.creator.image}' style='border-radius: 50%; float:right; width:80px; margin-top:-20px;'></img></a>`: undefined"},
       {"label":"civitai_name","calc":"customMetadata.civitai_url ? `<a target='_blank' href='${customMetadata.civitai_url}'>${civitaiMetadata?.model?.name}</a>` : undefined"},
-      {"label":"civitai_description","calc":"(function(){ const modelDesc = civitaiMetadata?.model?.description; const versionDesc = civitaiMetadata?.description; if (modelDesc && versionDesc) return versionDesc + '<hr style=\"margin: 1em 0; border: 1px solid #ccc;\">' + modelDesc; return modelDesc || versionDesc || undefined; })()"},
+      {"label":"civitai_description","calc":"(civitaiMetadata?.description && civitaiMetadata?.model?.description) ? (civitaiMetadata.description + '<hr style=\"margin: 1em 0; border: 1px solid #ccc;\">' + civitaiMetadata.model.description) : (civitaiMetadata?.model?.description || civitaiMetadata?.description || undefined)"},
     ];
     
     const metadataDisplay = document.getElementById('metadataDisplay');
@@ -1195,29 +1222,6 @@
     //#endregion Initialization 
     //#region UI Rendering
     
-    function isVideoUrl(url) {
-      if (!url) return false;
-      const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.mkv'];
-      const lowerUrl = url.toLowerCase();
-      return videoExtensions.some(ext => lowerUrl.includes(ext));
-    }
-    
-    function createPreviewElement(url, civitaiUrl = null) {
-      if (!url) return '';
-      
-      const isVideo = isVideoUrl(url);
-      const mediaStyle = 'max-width: 100%; display: block; height: auto;';
-      const linkStyle = 'display: inline-block; max-width: 100%;';
-      
-      if (isVideo) {
-        const videoHtml = `<video controls autoplay loop muted style="${mediaStyle}"><source src="${url}" type="video/mp4">Your browser does not support the video tag.</video>`;
-        return civitaiUrl ? `<a target='_blank' href='${civitaiUrl}' style='${linkStyle}'>${videoHtml}</a>` : videoHtml;
-      } else {
-        const imgHtml = `<img src='${url}' style='${mediaStyle}'>`;
-        return civitaiUrl ? `<a target='_blank' href='${civitaiUrl}' style='${linkStyle}'>${imgHtml}</a>` : imgHtml;
-      }
-    }
-    
     function clearAll(){
       notificationPanel.innerHTML = '';
       editorNotificationPanel.innerHTML = '';
@@ -1582,6 +1586,7 @@
         
         // Special handling for preview - render as raw HTML (for video/image tags)
         if (placeholder === 'custom.preview' && value && typeof value === 'string') {
+          console.log('Preview value:', value.substring(0, 100)); // Log first 100 chars
           return value; // Return raw HTML without escaping
         }
         
