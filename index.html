@@ -496,7 +496,7 @@
         <table>
           <tr><td>Model URL:</td><td><a id="modelUrl" target='_blank' href="#"></a></td></tr>
           <tr><td>Resource Info:</td><td><a id="resourceUrl" target='_blank' href="#"></a></td></tr>
-          <tr><td>Preview:</td><td><img id='previewImage' src='' /></td></tr>
+          <tr><td>Preview:</td><td><div id='previewContainer' style='max-width: 100%; overflow: hidden;'></div></td></tr>
         </table>
         <div><pre id="civitaiDisplay" class="json-data"></div>
       </div>
@@ -587,7 +587,7 @@
       {"label":"optimizer","calc":"fileMetadata.ss_optimizer && fileMetadata.ss_optimizer.match(/\\b(\\w+)\\b(?=\\s*\\()|\\b(\\w+)\\b$/)?.[0]"},
       {"label":"civitai_url","calc":"civitaiMetadata?.modelId ? `https://civitai.com/models/${civitaiMetadata.modelId}?modelVersionId=${civitaiMetadata.id}` : null"},
       {"label":"civitai_link","calc":"customMetadata.civitai_url ? `<a target='_blank' href='${customMetadata.civitai_url}'>${fileMetadata.ss_output_name || safetensorsFile.name}</a>` : fileMetadata.ss_output_name || safetensorsFile.name"},
-      {"label":"preview","calc":"(civitaiMetadata?.images && customMetadata.civitai_url) ? `<a target='_blank' href='${customMetadata.civitai_url}'><img src='${civitaiMetadata.images[0].url}' style='max-width: 100%;'></a>` : ``"},
+      {"label":"preview","calc":"(civitaiMetadata?.images && civitaiMetadata.images.length > 0 && customMetadata.civitai_url) ? createPreviewElement(civitaiMetadata.images[0].url, customMetadata.civitai_url) : ''"},
       {"label":"base_model_hash","calc":"(fileMetadata.ss_new_sd_model_hash || fileMetadata.ss_sd_model_hash).substring(0,10)"},
       {"label":"base_model_url","calc":"basemodelMetadata?.modelId ? `<a target='_blank' href='https://civitai.com/models/${basemodelMetadata.modelId}?modelVersionId=${basemodelMetadata.id}'>${fileMetadata.ss_sd_model_name} (${basemodelMetadata.baseModel || civitaiMetadata.baseModel})</a>` : (fileMetadata.ss_sd_model_name.indexOf('/')>0 ? `<a target='_blank' href='https://huggingface.co/${fileMetadata.ss_sd_model_name}'>${fileMetadata.ss_sd_model_name}</a>` : fileMetadata.ss_sd_model_name)"},
       {"label":"vae_url","calc":"vaeMetadata?.modelId ? `<a target='_blank' href='https://civitai.com/models/${vaeMetadata.modelId}?modelVersionId=${vaeMetadata.id}'>${fileMetadata.ss_vae_name}</a>` : (fileMetadata.ss_vae_name.indexOf('/')>0 ? `<a target='_blank' href='https://huggingface.co/${fileMetadata.ss_vae_name}'>${fileMetadata.ss_vae_name}</a>` : fileMetadata.ss_vae_name)"},
@@ -607,7 +607,7 @@
       {"label":"file_hash","calc":"customMetadata?.lora_hash.toUpperCase() + (customMetadata?.lora_hash_type?` (${customMetadata?.lora_hash_type})`:'')"},
       {"label":"creator","calc":"civitaiMetadata?.model ? `<a href='https://civitai.com/user/${civitaiMetadata?.model?.creator.username}' target='_blank'><span>${civitaiMetadata?.model?.creator.username}</span><img alt='' src='${civitaiMetadata?.model?.creator.image}' style='border-radius: 50%; float:right; width:80px; margin-top:-20px;'></img></a>`: undefined"},
       {"label":"civitai_name","calc":"customMetadata.civitai_url ? `<a target='_blank' href='${customMetadata.civitai_url}'>${civitaiMetadata?.model?.name}</a>` : undefined"},
-      {"label":"civitai_description","calc":"civitaiMetadata?.description || undefined"},
+      {"label":"civitai_description","calc":"(function(){ console.log('CivitAI description:', civitaiMetadata?.description); return civitaiMetadata?.description || undefined; })()"},
     ];
     
     const metadataDisplay = document.getElementById('metadataDisplay');
@@ -621,7 +621,7 @@
     const modelUrl = document.getElementById('modelUrl');
     const resourceUrl = document.getElementById('resourceUrl');
     const civitaiDisplay = document.getElementById('civitaiDisplay');
-    const previewImage = document.getElementById('previewImage');
+    const previewContainer = document.getElementById('previewContainer');
     const keywordDetails = document.getElementById('keywordDetails');
     const suggestedPromptDetails = document.getElementById('suggestedPromptDetails');
     const notificationPanel = document.getElementById('notificationPanel');
@@ -1194,6 +1194,30 @@
 
     //#endregion Initialization 
     //#region UI Rendering
+    
+    function isVideoUrl(url) {
+      if (!url) return false;
+      const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.mkv'];
+      const lowerUrl = url.toLowerCase();
+      return videoExtensions.some(ext => lowerUrl.includes(ext));
+    }
+    
+    function createPreviewElement(url, civitaiUrl = null) {
+      if (!url) return '';
+      
+      const isVideo = isVideoUrl(url);
+      const mediaStyle = 'max-width: 100%; display: block; height: auto;';
+      const linkStyle = 'display: inline-block; max-width: 100%;';
+      
+      if (isVideo) {
+        const videoHtml = `<video controls autoplay loop muted style="${mediaStyle}"><source src="${url}" type="video/mp4">Your browser does not support the video tag.</video>`;
+        return civitaiUrl ? `<a target='_blank' href='${civitaiUrl}' style='${linkStyle}'>${videoHtml}</a>` : videoHtml;
+      } else {
+        const imgHtml = `<img src='${url}' style='${mediaStyle}'>`;
+        return civitaiUrl ? `<a target='_blank' href='${civitaiUrl}' style='${linkStyle}'>${imgHtml}</a>` : imgHtml;
+      }
+    }
+    
     function clearAll(){
       notificationPanel.innerHTML = '';
       editorNotificationPanel.innerHTML = '';
@@ -1205,7 +1229,7 @@
       modelUrl.innerHTML = '';
       resourceUrl.href = '#';
       resourceUrl.innerHTML = '';
-      previewImage.src = '';
+      previewContainer.innerHTML = '';
       civitaiDisplay.innerHTML = '';
       keywordDetails.innerHTML = '';
       metadataDisplay.innerHTML = '';
@@ -1300,7 +1324,12 @@
           resourceUrl.href = data.resourceUrl;
           resourceUrl.innerHTML = data.resourceUrl;
           formatAndColorizeJSON(data.data, civitaiDisplay);
-          previewImage.src = data.data.images[0].url;
+          
+          // Set preview (supports both images and videos)
+          if (data.data.images && data.data.images.length > 0) {
+            previewContainer.innerHTML = createPreviewElement(data.data.images[0].url);
+          }
+          
           civitaiMetadata = data.data;
           customMetadata.civiai_model_link = modelUrl.cloneNode(true).outerHTML;
           customMetadata.civiai_resource_link = resourceUrl.cloneNode(true).outerHTML;
@@ -1545,6 +1574,12 @@
           placeholder = placeholder.slice(0, -1); 
         }
         const value = data !== null ? data[placeholder] : fetchMetadataValue(placeholder);
+        
+        // Special handling for civitai_description - render as raw HTML
+        if (placeholder === 'custom.civitai_description' && value && typeof value === 'string') {
+          return value; // Return raw HTML without escaping
+        }
+        
         if (typeof value === 'object') return (colorize?`<pre>${colorizeJSON(value)}</pre>`:value);
         else if(value !== undefined && value !== "undefined") return colorize ? colorizeJSON(value, true) : value;
         else if(remove) return '';
