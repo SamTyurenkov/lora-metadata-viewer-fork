@@ -169,9 +169,15 @@ def update_safetensors_metadata(file_path, new_metadata):
             if isinstance(value, (dict, list)):
                 # Convert complex objects to JSON strings with ensure_ascii=False
                 formatted_metadata[key] = json.dumps(value, ensure_ascii=False)
+            elif isinstance(value, str):
+                # Keep strings as-is
+                formatted_metadata[key] = value
             else:
-                # Convert other types to strings
-                formatted_metadata[key] = str(value)
+                # Convert other types (int, float, bool, None) to strings
+                formatted_metadata[key] = str(value) if value is not None else ""
+        
+        print(f"Formatted metadata keys: {list(formatted_metadata.keys())}")
+        print(f"Formatted metadata sample: {json.dumps(dict(list(formatted_metadata.items())[:3]), indent=2, ensure_ascii=False)}")
         
         # Update the __metadata__ section
         header['__metadata__'] = formatted_metadata
@@ -386,6 +392,12 @@ def update_file_metadata(filename):
         new_metadata = request_data['metadata']
         
         print(f"Updating metadata in: {file_path}")
+        print(f"Received metadata keys: {list(new_metadata.keys())}")
+        print(f"Received metadata: {json.dumps(new_metadata, indent=2, ensure_ascii=False)}")
+        
+        # Validate that metadata is not empty
+        if not new_metadata:
+            return jsonify({'error': 'Metadata cannot be empty'}), 400
         
         # Update the metadata in the file
         success = update_safetensors_metadata(file_path, new_metadata)
@@ -393,10 +405,14 @@ def update_file_metadata(filename):
         if not success:
             return jsonify({'error': 'Failed to update metadata'}), 500
         
+        print(f"Metadata update successful, reading back...")
+        
         # Return the updated metadata
         result = extract_safetensors_metadata(file_path)
         if result is None:
             return jsonify({'error': 'Failed to read updated metadata'}), 500
+        
+        print(f"Read back metadata keys: {list(result.get('metadata', {}).keys())}")
         
         # Add file info
         file_info = get_file_info(file_path)
@@ -406,6 +422,8 @@ def update_file_metadata(filename):
     
     except Exception as e:
         print(f"Error updating metadata in {filename}: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': f'Error updating metadata: {str(e)}'}), 500
 
 @app.route('/api/info')
