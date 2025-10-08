@@ -167,18 +167,26 @@ def update_safetensors_metadata(file_path, new_metadata):
         formatted_metadata = {}
         for key, value in new_metadata.items():
             if isinstance(value, (dict, list)):
-                # Convert complex objects to JSON strings
-                formatted_metadata[key] = json.dumps(value)
+                # Convert complex objects to JSON strings with ensure_ascii=False
+                formatted_metadata[key] = json.dumps(value, ensure_ascii=False)
             else:
-                formatted_metadata[key] = value
+                # Convert other types to strings
+                formatted_metadata[key] = str(value)
         
         # Update the __metadata__ section
         header['__metadata__'] = formatted_metadata
         
-        # Serialize the new header
-        new_header_json = json.dumps(header, separators=(',', ':'))
+        # Serialize the new header with ensure_ascii=False and no whitespace
+        new_header_json = json.dumps(header, separators=(',', ':'), ensure_ascii=False)
         new_header_bytes = new_header_json.encode('utf-8')
         new_metadata_size = len(new_header_bytes)
+        
+        # Validate that we can deserialize the header
+        try:
+            json.loads(new_header_bytes.decode('utf-8'))
+        except json.JSONDecodeError as e:
+            print(f"Generated invalid JSON header: {e}")
+            return False
         
         # Create new header with size
         new_header_with_size = struct.pack('<I', new_metadata_size) + b'\x00\x00\x00\x00' + new_header_bytes
@@ -197,6 +205,8 @@ def update_safetensors_metadata(file_path, new_metadata):
         
     except Exception as e:
         print(f"Error updating metadata in {file_path}: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 @app.route('/')
