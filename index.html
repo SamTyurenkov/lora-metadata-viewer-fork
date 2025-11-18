@@ -1337,6 +1337,26 @@
           civitaiMetadata = data.data;
           customMetadata.civiai_model_link = modelUrl.cloneNode(true).outerHTML;
           customMetadata.civiai_resource_link = resourceUrl.cloneNode(true).outerHTML;
+        } else if (data?.autov3) {
+          // If CivitAI fetch was unsuccessful, try to load local HTML description
+          try {
+            const htmlPath = `html_description/${data.autov3}.html`;
+            const response = await fetch(htmlPath);
+            if (response.ok) {
+              const htmlContent = await response.text();
+              // Initialize civitaiMetadata if it doesn't exist
+              if (!civitaiMetadata) {
+                civitaiMetadata = {};
+              }
+              // Only use local description if no remote description exists
+              if (!civitaiMetadata.description) {
+                civitaiMetadata.description = htmlContent;
+              }
+            }
+          } catch (error) {
+            // Silently fail if local HTML file doesn't exist
+            console.log('Local HTML description not found:', error);
+          }
         }
         const baseModelHash = fileMetadata.ss_new_sd_model_hash || fileMetadata.ss_sd_model_hash;
         if(baseModelHash){
@@ -1348,7 +1368,7 @@
           const vaeInfo = await getCivitAiData(null, vaeHash);
           if(vaeInfo && vaeInfo.data) vaeMetadata = vaeInfo.data;
         }
-        if (data?.data || baseModelHash || vaeHash) setCustomMetadata();
+        if (data?.data || baseModelHash || vaeHash || (data?.autov3 && civitaiMetadata?.description)) setCustomMetadata();
         updateSummary(fileMetadata, civitaiMetadata, customMetadata);
       }
     }
