@@ -939,13 +939,20 @@
             updateMetadata(metadataResult.metadata);
             updateTagFrequency(metadataResult.metadata);
             updateTagFrequency(metadataResult.metadata, true);
-            updateSummary(metadataResult.metadata, civitaiMetadata, customMetadata);
             
             // Pass hashes from server for CivitAI lookup
             if (metadataResult.hashes) {
               safetensorsFile.serverHashes = metadataResult.hashes;
             }
-            updateCivitAiInfo(safetensorsFile);
+            updateLoading('Looking up CivitAI info...', 80);
+            try {
+              await updateCivitAiInfo(safetensorsFile);
+            } catch (error) {
+              console.error('Error updating CivitAI info:', error);
+              // Continue even if CivitAI lookup fails
+            }
+            // Repopulate summary after CivitAI lookup completes (or fails) to ensure all fields are updated
+            updateSummary(metadataResult.metadata, civitaiMetadata, customMetadata);
             
             hideLoading();
             notificationPanel.innerHTML = `Loaded metadata for: ${fileName}`;
@@ -1048,8 +1055,14 @@
 
     async function handleFileData(file) {
       if(file.name.endsWith('.gguf')) {
-        updateCivitAiInfo(file);
+        try {
+          await updateCivitAiInfo(file);
+        } catch (error) {
+          console.error('Error updating CivitAI info:', error);
+          // Continue even if CivitAI lookup fails
+        }
         setCustomMetadata();
+        updateSummary(fileMetadata, civitaiMetadata, customMetadata);
         return;
       }
       if (!file.name.endsWith('.safetensors')) {
@@ -1094,8 +1107,16 @@
         updateMetadata(metadata);
         updateTagFrequency(metadata);
         updateTagFrequency(metadata,true);
-        updateSummary(metadata, civitaiMetadata, customMetadata);
-        updateCivitAiInfo(file);
+        
+        updateLoading('Looking up CivitAI info...', 30);
+        try {
+          await updateCivitAiInfo(file);
+        } catch (error) {
+          console.error('Error updating CivitAI info:', error);
+          // Continue even if CivitAI lookup fails
+        }
+        // Repopulate summary after CivitAI lookup completes (or fails) to ensure all fields are updated
+        updateSummary(fileMetadata, civitaiMetadata, customMetadata);
       } catch (error) {
         notificationPanel.innerHTML += 'Error parsing metadata.<br>';
         console.error('Error reading file:', error);
@@ -1317,58 +1338,81 @@
 
     async function updateCivitAiInfo(file, hash = null){
       if (enableCivitAiInfo.checked) {
-        const data = await getCivitAiData(file);
-        if(data?.hash) customMetadata.lora_hash = data.hash;
-        if(data?.hashType) customMetadata.lora_hash_type = data.hashType;
-        if(data?.autov2) customMetadata.autov2 = data.autov2;
-        if(data?.autov3) customMetadata.autov3 = data.autov3;
-        if (data?.data) {
-          modelUrl.href = data.modelUrl;
-          modelUrl.innerHTML = data.modelUrl;
-          resourceUrl.href = data.resourceUrl;
-          resourceUrl.innerHTML = data.resourceUrl;
-          formatAndColorizeJSON(data.data, civitaiDisplay);
+        try {
+          // Clear CivitAI-related fields at the start to ensure clean state
+          modelUrl.href = '#';
+          modelUrl.innerHTML = '';
+          resourceUrl.href = '#';
+          resourceUrl.innerHTML = '';
+          previewContainer.innerHTML = '';
+          civitaiDisplay.innerHTML = '';
+          civitaiMetadata = {};
+          basemodelMetadata = {};
+          vaeMetadata = {};
           
-          // Set preview (supports both images and videos)
-          if (data.data.images && data.data.images.length > 0) {
-            previewContainer.innerHTML = createPreviewElement(data.data.images[0].url);
-          }
-          
-          civitaiMetadata = data.data;
-          customMetadata.civiai_model_link = modelUrl.cloneNode(true).outerHTML;
-          customMetadata.civiai_resource_link = resourceUrl.cloneNode(true).outerHTML;
-        } else if (data?.autov3) {
-          // If CivitAI fetch was unsuccessful, try to load local HTML description
-          try {
-            const htmlPath = `html_description/${data.autov3}.html`;
-            const response = await fetch(htmlPath);
-            if (response.ok) {
-              const htmlContent = await response.text();
-              // Initialize civitaiMetadata if it doesn't exist
-              if (!civitaiMetadata) {
-                civitaiMetadata = {};
-              }
-              // Only use local description if no remote description exists
-              if (!civitaiMetadata.description) {
-                civitaiMetadata.description = htmlContent;
-              }
+          const data = await getCivitAiData(file);
+          if(data?.hash) customMetadata.lora_hash = data.hash;
+          if(data?.hashType) customMetadata.lora_hash_type = data.hashType;
+          if(data?.autov2) customMetadata.autov2 = data.autov2;
+          if(data?.autov3) customMetadata.autov3 = data.autov3;
+          if (data?.data) {
+            modelUrl.href = data.modelUrl;
+            modelUrl.innerHTML = data.modelUrl;
+            resourceUrl.href = data.resourceUrl;
+            resourceUrl.innerHTML = data.resourceUrl;
+            formatAndColorizeJSON(data.data, civitaiDisplay);
+            
+            // Set preview (supports both images and videos)
+            if (data.data.images && data.data.images.length > 0) {
+              previewContainer.innerHTML = createPreviewElement(data.data.images[0].url);
             }
-          } catch (error) {
-            // Silently fail if local HTML file doesn't exist
-            console.log('Local HTML description not found:', error);
+            
+            civitaiMetadata = data.data;
+            customMetadata.civiai_model_link = modelUrl.cloneNode(true).outerHTML;
+            customMetadata.civiai_resource_link = resourceUrl.cloneNode(true).outerHTML;
+          } else if (data?.autov3) {
+            // If CivitAI fetch was unsuccessful, try to load local HTML description
+            try {
+              const htmlPath = `html_description/${data.autov3}.html`;
+              const response = await fetch(htmlPath);
+              if (response.ok) {
+                const htmlContent = await response.text();
+                // Initialize civitaiMetadata if it doesn't exist
+                if (!civitaiMetadata) {
+                  civitaiMetadata = {};
+                }
+                // Only use local description if no remote description exists
+                if (!civitaiMetadata.description) {
+                  civitaiMetadata.description = htmlContent;
+                }
+              }
+            } catch (error) {
+              // Silently fail if local HTML file doesn't exist
+              console.log('Local HTML description not found:', error);
+            }
           }
+          const baseModelHash = fileMetadata.ss_new_sd_model_hash || fileMetadata.ss_sd_model_hash;
+          if(baseModelHash){
+            const baseModelInfo = await getCivitAiData(null, baseModelHash);
+            if(baseModelInfo && baseModelInfo.data) basemodelMetadata = baseModelInfo.data;
+          }
+          const vaeHash = fileMetadata.ss_new_vae_hash || fileMetadata.ss_vae_hash;
+          if(vaeHash){
+            const vaeInfo = await getCivitAiData(null, vaeHash);
+            if(vaeInfo && vaeInfo.data) vaeMetadata = vaeInfo.data;
+          }
+        } catch (error) {
+          console.error('Error in updateCivitAiInfo:', error);
+          // Continue to ensure fields are still repopulated even if lookup fails
+        } finally {
+          // Always call setCustomMetadata and updateSummary to ensure fields are repopulated
+          // even if CivitAI lookup failed
+          setCustomMetadata();
+          updateSummary(fileMetadata, civitaiMetadata, customMetadata);
         }
-        const baseModelHash = fileMetadata.ss_new_sd_model_hash || fileMetadata.ss_sd_model_hash;
-        if(baseModelHash){
-          const baseModelInfo = await getCivitAiData(null, baseModelHash);
-          if(baseModelInfo && baseModelInfo.data) basemodelMetadata = baseModelInfo.data;
-        }
-        const vaeHash = fileMetadata.ss_new_vae_hash || fileMetadata.ss_vae_hash;
-        if(vaeHash){
-          const vaeInfo = await getCivitAiData(null, vaeHash);
-          if(vaeInfo && vaeInfo.data) vaeMetadata = vaeInfo.data;
-        }
-        if (data?.data || baseModelHash || vaeHash || (data?.autov3 && civitaiMetadata?.description)) setCustomMetadata();
+      } else {
+        // Even if CivitAI info is disabled, ensure summary is updated
+        setCustomMetadata();
         updateSummary(fileMetadata, civitaiMetadata, customMetadata);
       }
     }
