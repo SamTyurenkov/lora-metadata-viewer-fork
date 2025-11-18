@@ -9,7 +9,7 @@ import json
 import struct
 import hashlib
 from pathlib import Path
-from flask import Flask, render_template_string, jsonify, send_file, request
+from flask import Flask, render_template_string, jsonify, send_file, request, Response
 from flask_cors import CORS
 import argparse
 
@@ -425,6 +425,38 @@ def update_file_metadata(filename):
         import traceback
         traceback.print_exc()
         return jsonify({'error': f'Error updating metadata: {str(e)}'}), 500
+
+@app.route('/html_description/<path:filename>')
+def serve_html_description(filename):
+    """Serve HTML description files from html_description directory"""
+    try:
+        # Get the directory where this script is located
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        html_desc_dir = os.path.join(script_dir, 'html_description')
+        file_path = os.path.join(html_desc_dir, filename)
+        file_path = os.path.abspath(file_path)
+        html_desc_dir_abs = os.path.abspath(html_desc_dir)
+        
+        # Security check: ensure the file is within the html_description directory
+        if not file_path.startswith(html_desc_dir_abs):
+            return jsonify({'error': 'Access denied'}), 403
+        
+        if not os.path.exists(file_path):
+            return jsonify({'error': 'File not found'}), 404
+        
+        # Only serve .html files
+        if not filename.lower().endswith('.html'):
+            return jsonify({'error': 'Only HTML files are allowed'}), 400
+        
+        # Read and return the HTML file
+        with open(file_path, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+        
+        return Response(html_content, mimetype='text/html')
+    
+    except Exception as e:
+        print(f"Error serving HTML description {filename}: {str(e)}")
+        return jsonify({'error': f'Error serving file: {str(e)}'}), 500
 
 @app.route('/api/info')
 def server_info():
