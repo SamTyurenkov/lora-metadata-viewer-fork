@@ -99,6 +99,13 @@
     .modal .btn-primary:hover { background-color: #3d8bf7; }
     .modal .btn-secondary { background-color: var(--ltheme); color: var(--vltheme); }
     .modal .btn-secondary:hover { background-color: var(--theme); }
+    #toast-container { position: fixed; right: 16px; bottom: 16px; z-index: 3000; display: flex; flex-direction: column-reverse; align-items: flex-end; gap: 8px; pointer-events: none; }
+    .toast { width: 250px; padding: 10px 12px; border-radius: 8px; font-size: 0.8em; line-height: 1.35; box-shadow: 0 4px 12px rgba(0,0,0,0.35); opacity: 0; transform: translateY(12px); transition: opacity 0.3s ease, transform 0.3s ease; pointer-events: auto; word-wrap: break-word; background-color: var(--dtheme); color: var(--vltheme); border-left: 4px solid var(--link); }
+    .toast.toast-visible { opacity: 1; transform: translateY(0); }
+    .toast-success { border-left-color: var(--string); }
+    .toast-info { border-left-color: var(--link); }
+    .toast-warning { border-left-color: var(--number); }
+    .toast-error { border-left-color: var(--error); }
   </style>
 </head>
 <body class="dark-theme">
@@ -547,6 +554,8 @@
     </div>
   </div>
 
+  <div id="toast-container"></div>
+
   <!-- Loading Animation Div -->
   <div id="loading">
     <div class="loading-message"></div>
@@ -604,6 +613,92 @@
     function appUrl(path) {
       const basePath = window.location.pathname.replace(/\/$/, '');
       return `${basePath}/${path.replace(/^\//, '')}`;
+    }
+
+    function isMissingValue(value) {
+      return value === undefined || value === null || value === "undefined";
+    }
+
+    function fileNameFromPath(path, stripExtension = false) {
+      if (!path || typeof path !== 'string') return undefined;
+      const fileName = path.split(/[\\/]/).pop();
+      return stripExtension ? fileName.replace(/\.[^.]+$/, '') : fileName;
+    }
+
+    function stripHashPrefix(hash) {
+      return typeof hash === 'string' ? hash.replace(/^0x/i, '') : hash;
+    }
+
+    function setMetadataIfMissing(key, value) {
+      if (!isMissingValue(fileMetadata[key]) || isMissingValue(value)) return false;
+      fileMetadata[key] = value;
+      return true;
+    }
+
+    function getOneTrainerConceptImageCount(concept) {
+      const stats = concept?.concept_stats;
+      if (!stats || typeof stats !== 'object') return undefined;
+      return stats.img_count || stats.image_count || stats.num_images || stats.count;
+    }
+
+    function getSuggestedTriggerWordsFromTags(limit = 10) {
+      const tagCounts = fileMetadata.ss_tag_frequency?.total;
+      if (!tagCounts || typeof tagCounts !== 'object') return undefined;
+      return Object.entries(tagCounts)
+        .sort(([, a], [, b]) => b - a)
+        .slice(0, limit)
+        .map(([tag]) => tag);
+    }
+
+    function getOneTrainerDatasetDirs(config) {
+      if (!Array.isArray(config?.concepts)) return undefined;
+      const dirs = {};
+      config.concepts.forEach((concept) => {
+        const imgCount = getOneTrainerConceptImageCount(concept);
+        if (!imgCount) return;
+        const name = concept.name || fileNameFromPath(concept.path) || 'dataset';
+        dirs[name] = {
+          img_count: imgCount,
+          n_repeats: concept.balancing,
+        };
+      });
+      return Object.keys(dirs).length ? dirs : undefined;
+    }
+
+    function autoFillMetadataFromAvailableSources() {
+      if (!fileMetadata || typeof fileMetadata !== 'object') return 0;
+      const config = fileMetadata.ot_config || {};
+      let filled = 0;
+      const set = (key, value) => { if (setMetadataIfMissing(key, value)) filled++; };
+
+      set('ss_output_name', fileNameFromPath(config.output_model_destination, true) || config.lora_model_name || fileMetadata['modelspec.title']);
+      set('ss_sd_model_name', fileNameFromPath(config.base_model_name));
+      set('ss_network_module', config.peft_type === 'LORA' ? 'networks.lora' : config.peft_type);
+      set('ss_gradient_accumulation_steps', config.gradient_accumulation_steps);
+      set('ss_optimizer', config.optimizer?.optimizer);
+      set('ss_lr_scheduler', typeof config.learning_rate_scheduler === 'string' ? config.learning_rate_scheduler.toLowerCase() : config.learning_rate_scheduler);
+      set('ss_clip_skip', config.text_encoder_layer_skip);
+      set('ss_network_dim', config.lora_rank);
+      set('ss_network_alpha', config.lora_alpha);
+      set('ss_learning_rate', config.learning_rate);
+      set('ss_text_encoder_lr', config.text_encoder?.learning_rate || config.text_encoder_2?.learning_rate);
+      set('ss_unet_lr', config.unet?.learning_rate || config.learning_rate);
+      set('ss_noise_offset', config.offset_noise_weight);
+      set('sshs_model_hash', stripHashPrefix(fileMetadata['modelspec.hash_sha256']));
+      set('ss_sd_model_hash', stripHashPrefix(fileMetadata['modelspec.hash_sha256']));
+      set('ss_total_batch_size', config.batch_size);
+      set('ss_resolution', fileMetadata['modelspec.resolution'] || config.resolution);
+      set('ss_dataset_dirs', getOneTrainerDatasetDirs(config));
+
+      if (!civitaiMetadata.trainedWords) {
+        const suggestedTriggerWords = getSuggestedTriggerWordsFromTags();
+        if (suggestedTriggerWords?.length) {
+          civitaiMetadata.trainedWords = suggestedTriggerWords;
+          filled++;
+        }
+      }
+
+      return filled;
     }
     
     defaults.customFields = [
@@ -936,7 +1031,11 @@
             
             // Process the metadata directly
             fileMetadata = metadataResult.metadata;
-            updateMetadataEditor(metadataResult.formatted_metadata);
+            const autoFilledCount = autoFillMetadataFromAvailableSources();
+            updateMetadataEditor(fileMetadata);
+            if (autoFilledCount) {
+              showToast(`Auto-filled ${autoFilledCount} metadata value(s) from available metadata`, 'info');
+            }
             
             updateLoading('Processing custom fields...', 70);
             setCustomMetadata();
@@ -961,6 +1060,13 @@
             
             hideLoading();
             notificationPanel.innerHTML = `Loaded metadata for: ${fileName}`;
+            showToast(`Metadata loaded from server: ${fileName}`, 'success');
+            if (metadataResult.html_description_cache) {
+              showHtmlCacheToast(
+                metadataResult.html_description_cache,
+                metadataResult.hashes?.AutoV3
+              );
+            }
             return;
           } else {
             // If metadata extraction fails, fall back to downloading the entire file
@@ -1104,7 +1210,11 @@
         
         updateLoading('Setting up metadata...', 28);
         fileMetadata = metadata;
-        updateMetadataEditor(formattedMetadata);
+        const autoFilledCount = autoFillMetadataFromAvailableSources();
+        updateMetadataEditor(fileMetadata);
+        if (autoFilledCount) {
+          showToast(`Auto-filled ${autoFilledCount} metadata value(s) from available metadata`, 'info');
+        }
         
         updateLoading('Processing custom fields...', 29);
         setCustomMetadata();
@@ -1122,9 +1232,11 @@
         }
         // Repopulate summary after CivitAI lookup completes (or fails) to ensure all fields are updated
         updateSummary(fileMetadata, civitaiMetadata, customMetadata);
+        showToast(`Metadata loaded from file: ${file.name}`, 'success');
       } catch (error) {
         notificationPanel.innerHTML += 'Error parsing metadata.<br>';
         console.error('Error reading file:', error);
+        showToast('Error parsing metadata', 'error');
         hideLoading();
       }
     }
@@ -1274,6 +1386,42 @@
       safetensorsFile = null;
     }
 
+    const TOAST_DURATION_MS = 20000;
+
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.className = `toast toast-${type}`;
+      toast.textContent = message;
+      container.appendChild(toast);
+      requestAnimationFrame(() => toast.classList.add('toast-visible'));
+      setTimeout(() => {
+        toast.classList.remove('toast-visible');
+        setTimeout(() => toast.remove(), 300);
+      }, TOAST_DURATION_MS);
+    }
+
+    function showHtmlCacheToast(status, autov3) {
+      const file = autov3 ? `${autov3}.html` : '';
+      switch (status) {
+        case 'saved':
+          showToast(`Description saved to cache: ${file}`, 'success');
+          break;
+        case 'protected':
+          showToast(`Description not saved (protected file: ${file})`, 'warning');
+          break;
+        case 'not_found':
+          showToast('CivitAI: model not found for this hash', 'warning');
+          break;
+        case 'no_description':
+          showToast('CivitAI: found model but no description text', 'warning');
+          break;
+        case 'no_hash':
+          showToast('Could not cache description (AutoV3 hash missing)', 'warning');
+          break;
+      }
+    }
+
     function showLoading(message = null) {
       loading.style.display = 'block';
       updateLoading(message, 0);
@@ -1341,6 +1489,32 @@
       }
     }
 
+    function buildCivitaiDescriptionHtml(civitaiData) {
+      const versionDesc = civitaiData?.description || '';
+      const modelDesc = civitaiData?.model?.description || '';
+      if (versionDesc && modelDesc) {
+        return versionDesc + '<hr style="margin: 1em 0; border: 1px solid #ccc;">' + modelDesc;
+      }
+      return modelDesc || versionDesc || null;
+    }
+
+    async function saveCivitaiHtmlDescription(autov3, civitaiData) {
+      const html = buildCivitaiDescriptionHtml(civitaiData);
+      if (!autov3 || !html) return;
+      try {
+        const response = await fetch(appUrl('api/save-html-description'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ autov3, html }),
+        });
+        const result = await response.json();
+        showHtmlCacheToast(result.status || (result.saved ? 'saved' : 'protected'), autov3);
+      } catch (error) {
+        console.log('Failed to cache CivitAI HTML description:', error);
+        showToast('Failed to save description cache', 'error');
+      }
+    }
+
     async function updateCivitAiInfo(file, hash = null){
       if (enableCivitAiInfo.checked) {
         try {
@@ -1375,25 +1549,36 @@
             civitaiMetadata = data.data;
             customMetadata.civiai_model_link = modelUrl.cloneNode(true).outerHTML;
             customMetadata.civiai_resource_link = resourceUrl.cloneNode(true).outerHTML;
+            const hashLabel = data.hashType ? `${data.hashType} ${data.hash}` : (data.hash || 'unknown');
+            showToast(`CivitAI: loaded model info (${hashLabel})`, 'success');
+            if (!file?.isServerFile) {
+              await saveCivitaiHtmlDescription(data.autov3, civitaiMetadata);
+            }
           } else if (data?.autov3) {
             // If CivitAI fetch was unsuccessful, try to load local HTML description
+            let loadedFromCache = false;
             try {
               const response = await fetch(appUrl(`html_description/${data.autov3}.html`));
               if (response.ok) {
                 const htmlContent = await response.text();
-                // Initialize civitaiMetadata if it doesn't exist
                 if (!civitaiMetadata) {
                   civitaiMetadata = {};
                 }
-                // Only use local description if no remote description exists
                 if (!civitaiMetadata.description) {
                   civitaiMetadata.description = htmlContent;
+                  loadedFromCache = true;
                 }
               }
             } catch (error) {
-              // Silently fail if local HTML file doesn't exist
               console.log('Local HTML description not found:', error);
             }
+            if (loadedFromCache) {
+              showToast(`Description: loaded from cache (${data.autov3}.html)`, 'info');
+            } else {
+              showToast('CivitAI: not found, no cached description', 'warning');
+            }
+          } else {
+            showToast('CivitAI: lookup failed (no hash available)', 'warning');
           }
           const baseModelHash = fileMetadata.ss_new_sd_model_hash || fileMetadata.ss_sd_model_hash;
           if(baseModelHash){
@@ -1411,11 +1596,13 @@
         } finally {
           // Always call setCustomMetadata and updateSummary to ensure fields are repopulated
           // even if CivitAI lookup failed
+          autoFillMetadataFromAvailableSources();
           setCustomMetadata();
           updateSummary(fileMetadata, civitaiMetadata, customMetadata);
         }
       } else {
         // Even if CivitAI info is disabled, ensure summary is updated
+        autoFillMetadataFromAvailableSources();
         setCustomMetadata();
         updateSummary(fileMetadata, civitaiMetadata, customMetadata);
       }
@@ -1772,6 +1959,7 @@
           
           editorNotificationPanel.innerHTML = 'Metadata saved successfully!';
           editorNotificationPanel.style.color = 'var(--string)';
+          showToast('Metadata saved to file', 'success');
         } else {
           // For local files, just update the display
           fileMetadata = newMetadata;
@@ -1936,6 +2124,7 @@
         } catch(error){
           if (error.message === 'Unable to read the file.') 
             notificationPanel.innerHTML = (Object.keys(fileMetadata).length ? 'Metadata was found, but t':'T' ) + 'here was a problem calculating the hash. The file size may be too large.';
+            showToast('Hash calculation failed (file may be too large)', 'warning');
         }
       }
       updateLoading('CivitAI lookup...', 85);
@@ -1945,7 +2134,10 @@
           if (!response.ok) return null;
           return response.json();
         } catch (error) {
-          if (error instanceof TypeError) notificationPanel.innerHTML = "CivitAI lookup failed, possibly due to a CORS restriction or network error...";
+          if (error instanceof TypeError) {
+            notificationPanel.innerHTML = "CivitAI lookup failed, possibly due to a CORS restriction or network error...";
+            showToast('CivitAI: network or CORS error', 'error');
+          }
           else console.log('There was a problem:', error);
         }
       };

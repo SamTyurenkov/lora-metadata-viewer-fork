@@ -1,1 +1,5 @@
 venv/
+
+html_description/*
+!html_description/4b14f5e9ff13.html
+!html_description/7ed6e711b6e5.html

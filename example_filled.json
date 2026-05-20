@@ -1,0 +1,43 @@
+{
+    "ss_output_name": "ak-47",
+    "ss_sd_model_name": "889818.safetensors",
+    "ss_network_module": "networks.lora",
+    "custom.batch_size": 4,
+    "ss_gradient_accumulation_steps": 1,
+    "custom.resolution": "1024x1024",
+    "ss_optimizer": "transformers.optimization.Adafactor(scale_parameter=False,relative_step=False,warmup_init=False)",
+    "ss_lr_scheduler": "cosine_with_restarts",
+    "ss_clip_skip": 1,
+    "ss_network_dim": 32,
+    "ss_network_alpha": 16,
+    "ss_network_args": "undefined",
+    "ss_epoch": 10,
+    "ss_num_epochs": 10,
+    "ss_steps": 1790,
+    "ss_max_train_steps": 1790,
+    "ss_learning_rate": 0.0005,
+    "ss_text_encoder_lr": 0.00005,
+    "ss_unet_lr": 0.0005,
+    "ss_noise_offset": 0.1,
+    "ss_adaptive_noise_scale": "None",
+    "ss_min_snr_gamma": 5,
+    "sshs_model_hash": "84eca855be6e2aa4051a6e24cb60c31bed7a9b33239a855d6fba3547201cd659",
+    "custom.training_time": "1h 33m 25s",
+    "custom.training_start_time": "2025-02-24T10:46:43.120Z",
+    "custom.training_end_time": "2025-02-24T12:20:08.471Z",
+    "custom.lora_hash": "e60348a9cb",
+    "custom.lora_hash_type": "AutoV2",
+    "custom.civitai_url": "https://civitai.com/models/1290767?modelVersionId=1456558",
+    "ss_dataset_dirs": {
+      "img": {
+        "img_count": 72,
+        "n_repeats": 9
+      }
+    },
+    "civitai.trainedWords": [
+      "ak-47, assault rifle",
+      "aiming",
+      "holding",
+      "firing"
+    ]
+  }

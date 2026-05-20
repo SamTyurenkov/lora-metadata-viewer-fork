@@ -6,9 +6,13 @@ Serves safetensors files from a specified directory and provides a web interface
 
 import os
 import json
-import struct
+import tempfile
 import hashlib
+import urllib.request
+import urllib.error
 from pathlib import Path
+from safetensors import safe_open
+from safetensors.torch import save_file
 from flask import Flask, render_template_string, jsonify, send_file, request, Response
 from flask_cors import CORS
 import argparse
@@ -18,6 +22,73 @@ CORS(app)  # Enable CORS for all routes
 
 # Global variable to store the files directory
 FILES_DIR = None
+
+CIVITAI_VERSION_BY_HASH_URL = 'https://civitai.com/api/v1/model-versions/by-hash/'
+CIVITAI_MODEL_URL = 'https://civitai.com/api/v1/models/'
+PROTECTED_HTML_DESCRIPTIONS = frozenset({'4b14f5e9ff13.html', '7ed6e711b6e5.html'})
+
+def get_html_description_dir():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(script_dir, 'html_description')
+
+def _civitai_api_get(url):
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'LoRA-Metadata-Viewer/1.0'})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read().decode('utf-8'))
+    except (urllib.error.HTTPError, urllib.error.URLError, json.JSONDecodeError, TimeoutError) as e:
+        print(f"CivitAI API request failed ({url}): {e}")
+        return None
+
+def build_civitai_description_html(version_data, model_data=None):
+    """Match frontend civitai_description custom field formatting."""
+    version_desc = (version_data or {}).get('description') or ''
+    model_desc = (model_data or {}).get('description') or ''
+    if version_desc and model_desc:
+        return (
+            version_desc
+            + '<hr style="margin: 1em 0; border: 1px solid #ccc;">'
+            + model_desc
+        )
+    return model_desc or version_desc or None
+
+def lookup_civitai_by_hashes(autov2_hash, autov3_hash):
+    for hash_value in (autov2_hash, autov3_hash):
+        if not hash_value:
+            continue
+        data = _civitai_api_get(CIVITAI_VERSION_BY_HASH_URL + hash_value)
+        if data:
+            return data
+    return None
+
+def save_html_description(autov3_hash, html_content):
+    if not autov3_hash or not html_content:
+        return 'invalid'
+    filename = f'{autov3_hash}.html'
+    if filename in PROTECTED_HTML_DESCRIPTIONS:
+        return 'protected'
+    html_desc_dir = get_html_description_dir()
+    os.makedirs(html_desc_dir, exist_ok=True)
+    file_path = os.path.join(html_desc_dir, filename)
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.write(html_content)
+    print(f"Saved CivitAI description to {file_path}")
+    return 'saved'
+
+def fetch_and_save_civitai_description(autov2_hash, autov3_hash):
+    version_data = lookup_civitai_by_hashes(autov2_hash, autov3_hash)
+    if not version_data:
+        return 'not_found'
+    if not autov3_hash:
+        return 'no_hash'
+    model_data = None
+    model_id = version_data.get('modelId')
+    if model_id:
+        model_data = _civitai_api_get(f'{CIVITAI_MODEL_URL}{model_id}')
+    html_content = build_civitai_description_html(version_data, model_data)
+    if not html_content:
+        return 'no_description'
+    return save_html_description(autov3_hash, html_content)
 
 class PrefixMiddleware:
     def __init__(self, app, prefix):
@@ -112,25 +183,8 @@ def calculate_file_hash_autov3(file_path):
 def extract_safetensors_metadata(file_path):
     """Extract metadata from a safetensors file"""
     try:
-        with open(file_path, 'rb') as f:
-            # Read the first 8 bytes to get metadata size
-            header_bytes = f.read(8)
-            if len(header_bytes) < 8:
-                return None
-            
-            # Extract metadata size (little-endian uint32)
-            metadata_size = struct.unpack('<I', header_bytes[:4])[0]
-            
-            # Read the metadata
-            metadata_bytes = f.read(metadata_size)
-            if len(metadata_bytes) < metadata_size:
-                return None
-            
-            # Parse JSON header
-            header = json.loads(metadata_bytes.decode('utf-8'))
-            
-            # Extract the __metadata__ section
-            formatted_metadata = header.get('__metadata__', {})
+        with safe_open(file_path, framework="pt", device="cpu") as f:
+            formatted_metadata = f.metadata() or {}
             
             if not formatted_metadata:
                 return None
@@ -160,24 +214,6 @@ def extract_safetensors_metadata(file_path):
 def update_safetensors_metadata(file_path, new_metadata):
     """Update metadata in a safetensors file"""
     try:
-        # Read the entire file
-        with open(file_path, 'rb') as f:
-            file_data = f.read()
-        
-        # Parse the header to get the structure
-        header_bytes = file_data[:8]
-        if len(header_bytes) < 8:
-            return False
-        
-        metadata_size = struct.unpack('<I', header_bytes[:4])[0]
-        metadata_bytes = file_data[8:8+metadata_size]
-        
-        if len(metadata_bytes) < metadata_size:
-            return False
-        
-        # Parse the existing header
-        header = json.loads(metadata_bytes.decode('utf-8'))
-        
         # Convert new metadata to the format expected by safetensors
         formatted_metadata = {}
         for key, value in new_metadata.items():
@@ -194,33 +230,24 @@ def update_safetensors_metadata(file_path, new_metadata):
         print(f"Formatted metadata keys: {list(formatted_metadata.keys())}")
         print(f"Formatted metadata sample: {json.dumps(dict(list(formatted_metadata.items())[:3]), indent=2, ensure_ascii=False)}")
         
-        # Update the __metadata__ section
-        header['__metadata__'] = formatted_metadata
+        with safe_open(file_path, framework="pt", device="cpu") as f:
+            tensors = {key: f.get_tensor(key) for key in f.keys()}
+
+        file_dir = os.path.dirname(os.path.abspath(file_path)) or "."
+        fd, temp_path = tempfile.mkstemp(
+            prefix=f".{os.path.basename(file_path)}.",
+            suffix=".tmp",
+            dir=file_dir
+        )
+        os.close(fd)
         
-        # Serialize the new header with ensure_ascii=False and no whitespace
-        new_header_json = json.dumps(header, separators=(',', ':'), ensure_ascii=False)
-        new_header_bytes = new_header_json.encode('utf-8')
-        new_metadata_size = len(new_header_bytes)
-        
-        # Validate that we can deserialize the header
         try:
-            json.loads(new_header_bytes.decode('utf-8'))
-        except json.JSONDecodeError as e:
-            print(f"Generated invalid JSON header: {e}")
-            return False
-        
-        # Create new header with size
-        new_header_with_size = struct.pack('<I', new_metadata_size) + b'\x00\x00\x00\x00' + new_header_bytes
-        
-        # Get the tensor data (everything after the original metadata)
-        tensor_data = file_data[8+metadata_size:]
-        
-        # Create the new file content
-        new_file_data = new_header_with_size + tensor_data
-        
-        # Write the updated file
-        with open(file_path, 'wb') as f:
-            f.write(new_file_data)
+            save_file(tensors, temp_path, metadata=formatted_metadata)
+            os.replace(temp_path, file_path)
+        except Exception:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            raise
         
         return True
         
@@ -370,6 +397,12 @@ def get_file_metadata(filename):
         
         print(f"Hashes calculated - AutoV2: {autov2_hash}, AutoV3: {autov3_hash}")
         
+        if autov3_hash:
+            print("Looking up CivitAI description for cache...")
+            result['html_description_cache'] = fetch_and_save_civitai_description(
+                autov2_hash, autov3_hash
+            )
+        
         return jsonify(result)
     
     except Exception as e:
@@ -440,6 +473,25 @@ def update_file_metadata(filename):
         import traceback
         traceback.print_exc()
         return jsonify({'error': f'Error updating metadata: {str(e)}'}), 500
+
+@app.route('/api/save-html-description', methods=['POST'])
+def save_html_description_api():
+    """Save a CivitAI description HTML file keyed by AutoV3 hash."""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        autov3_hash = data.get('autov3')
+        html_content = data.get('html')
+        if not autov3_hash or not html_content:
+            return jsonify({'error': 'autov3 and html are required'}), 400
+        status = save_html_description(autov3_hash, html_content)
+        if status == 'saved':
+            return jsonify({'saved': True, 'status': status, 'filename': f'{autov3_hash}.html'})
+        return jsonify({'saved': False, 'status': status}), 200
+    except Exception as e:
+        print(f"Error saving HTML description: {e}")
+        return jsonify({'error': f'Error saving HTML description: {str(e)}'}), 500
 
 @app.route('/html_description/<path:filename>')
 def serve_html_description(filename):
