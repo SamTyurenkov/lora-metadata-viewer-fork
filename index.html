@@ -600,6 +600,11 @@
         return civitaiUrl ? `<a target='_blank' href='${civitaiUrl}' style='${linkStyle}'>${imgHtml}</a>` : imgHtml;
       }
     }
+
+    function appUrl(path) {
+      const basePath = window.location.pathname.replace(/\/$/, '');
+      return `${basePath}/${path.replace(/^\//, '')}`;
+    }
     
     defaults.customFields = [
       {"label":"training_start_time","calc":"new Date(fileMetadata.ss_training_started_at * 1000)"},
@@ -792,7 +797,7 @@
 
     function initServerMode() {
       // Check if we're running in server mode by trying to fetch server info
-      fetch('/api/info')
+      fetch(appUrl('api/info'))
         .then(response => response.json())
         .then(data => {
           if (data.server_mode) {
@@ -819,7 +824,7 @@
     async function loadServerFiles() {
       try {
         showLoading('Loading file list...');
-        const response = await fetch('/api/files');
+        const response = await fetch(appUrl('api/files'));
         const data = await response.json();
         
         if (response.ok) {
@@ -911,7 +916,7 @@
           showLoading('Loading metadata from server...');
           
           // Fetch metadata directly from server
-          const metadataResponse = await fetch(`/api/metadata/${encodeURIComponent(filePath)}`);
+          const metadataResponse = await fetch(appUrl(`api/metadata/${encodeURIComponent(filePath)}`));
           
           if (metadataResponse.ok) {
             const metadataResult = await metadataResponse.json();
@@ -968,7 +973,7 @@
         // Fall back to downloading the entire file (for .gguf files or if metadata extraction failed)
         showLoading('Downloading file...');
         
-        const response = await fetch(`/api/file/${encodeURIComponent(filePath)}`);
+        const response = await fetch(appUrl(`api/file/${encodeURIComponent(filePath)}`));
         
         if (response.ok) {
           const contentLength = response.headers.get('Content-Length');
@@ -1373,8 +1378,7 @@
           } else if (data?.autov3) {
             // If CivitAI fetch was unsuccessful, try to load local HTML description
             try {
-              const htmlPath = `html_description/${data.autov3}.html`;
-              const response = await fetch(htmlPath);
+              const response = await fetch(appUrl(`html_description/${data.autov3}.html`));
               if (response.ok) {
                 const htmlContent = await response.text();
                 // Initialize civitaiMetadata if it doesn't exist
@@ -1748,7 +1752,7 @@
           console.log('Saving metadata to:', safetensorsFile.relative_path);
           
           // Save to server - the backend will handle proper escaping
-          const response = await fetch(`/api/metadata/${safetensorsFile.relative_path}`, {
+          const response = await fetch(appUrl(`api/metadata/${safetensorsFile.relative_path}`), {
             method: 'PUT',
             headers: {
               'Content-Type': 'application/json',
@@ -2089,7 +2093,7 @@
           console.log('Saving metadata to:', safetensorsFile.relative_path);
           
           // Save to server - the backend will handle proper escaping
-          const response = await fetch(`/api/metadata/${safetensorsFile.relative_path}`, {
+          const response = await fetch(appUrl(`api/metadata/${safetensorsFile.relative_path}`), {
             method: 'PUT',
             headers: {
               'Content-Type': 'application/json',
