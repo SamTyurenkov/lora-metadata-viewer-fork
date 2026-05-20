@@ -19,6 +19,21 @@ CORS(app)  # Enable CORS for all routes
 # Global variable to store the files directory
 FILES_DIR = None
 
+class PrefixMiddleware:
+    def __init__(self, app, prefix):
+        self.app = app
+        self.prefix = prefix.rstrip("/")
+
+    def __call__(self, environ, start_response):
+        path = environ.get("PATH_INFO", "")
+        if path == self.prefix:
+            environ["PATH_INFO"] = "/"
+            environ["SCRIPT_NAME"] = self.prefix
+        elif path.startswith(self.prefix + "/"):
+            environ["PATH_INFO"] = path[len(self.prefix):] or "/"
+            environ["SCRIPT_NAME"] = self.prefix
+        return self.app(environ, start_response)
+
 def get_file_info(file_path):
     """Get basic file information"""
     try:
@@ -490,6 +505,12 @@ def main():
         action='store_true',
         help='Enable debug mode'
     )
+    parser.add_argument(
+        '--middleware',
+        metavar='PREFIX',
+        default=None,
+        help='URL path prefix for reverse-proxy mounting (e.g. lora -> /lora)'
+    )
     
     args = parser.parse_args()
     
@@ -505,9 +526,16 @@ def main():
         print(f"Error: Path is not a directory: {FILES_DIR}")
         return 1
     
+    if args.middleware:
+        prefix = "/" + args.middleware.strip("/")
+        app.wsgi_app = PrefixMiddleware(app.wsgi_app, prefix)
+
     print(f"Starting LoRA Metadata Viewer Server")
     print(f"Files directory: {FILES_DIR}")
-    print(f"Server will be available at: http://{args.host}:{args.port}")
+    base_url = f"http://{args.host}:{args.port}"
+    if args.middleware:
+        base_url += "/" + args.middleware.strip("/")
+    print(f"Server will be available at: {base_url}")
     
     # Count files to serve
     file_count = 0
